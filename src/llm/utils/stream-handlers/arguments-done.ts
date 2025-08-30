@@ -20,7 +20,9 @@ export const handleArgumentsDone: StreamEventHandler<Responses.ResponseFunctionC
     return;
   }
 
-  const parsed = safeParseJsonObject(event.arguments);
+  // Prefer explicit arguments on the event; otherwise fall back to accumulated buffer
+  const jsonText = typeof event.arguments === "string" ? event.arguments : current.buf;
+  const parsed = safeParseJsonObject(jsonText);
   
   if (!parsed) {
     return;

@@ -2,7 +2,7 @@
  * @file Type guards for web search-related response events.
  */
 import type { Responses } from "openai/resources/responses/responses";
-import { hasTypeProp, isString, asRecord } from "../common";
+import { hasTypeProp, isString, asRecord } from "./common";
 
 /**
  * Type guard for ResponseWebSearchCallCompletedEvent.

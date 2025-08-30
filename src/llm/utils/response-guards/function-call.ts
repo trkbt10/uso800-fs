@@ -2,7 +2,7 @@
  * @file Type guards for function call-related response events.
  */
 import type { Responses } from "openai/resources/responses/responses";
-import { hasTypeProp, isString, isNumber, asRecord } from "../common";
+import { hasTypeProp, isString, isNumber, asRecord } from "./common";
 
 /**
  * Type guard for ResponseFunctionCallArgumentsDeltaEvent.
@@ -55,7 +55,7 @@ function hasNameProperty(item: unknown): item is { name: string } {
     return false;
   }
   const obj = item as Record<string, unknown>;
-  return "name" in obj && typeof obj.name === "string";
+  return "name" in obj ? typeof obj.name === "string" : false;
 }
 
 /**

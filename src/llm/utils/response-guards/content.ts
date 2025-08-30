@@ -2,7 +2,7 @@
  * @file Type guards for content-related response events.
  */
 import type { Responses } from "openai/resources/responses/responses";
-import { hasTypeProp, isNumber, isObject, asRecord } from "../common";
+import { hasTypeProp, isNumber, isObject, asRecord } from "./common";
 
 /**
  * Type guard for ResponseContentPartAddedEvent.

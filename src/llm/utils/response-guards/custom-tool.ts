@@ -2,7 +2,7 @@
  * @file Type guards for custom tool call-related response events.
  */
 import type { Responses } from "openai/resources/responses/responses";
-import { hasTypeProp, isString, isNumber, asRecord } from "../common";
+import { hasTypeProp, isString, isNumber, asRecord } from "./common";
 
 /**
  * Type guard for ResponseCustomToolCallInputDeltaEvent.

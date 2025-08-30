@@ -2,7 +2,7 @@
  * @file Type guards for core response events.
  */
 import type { Responses } from "openai/resources/responses/responses";
-import { hasTypeProp, isString, isNumber, isObject, asRecord } from "../common";
+import { hasTypeProp, isString, isNumber, isObject, asRecord } from "./common";
 
 /**
  * Check if event is a valid ResponseStreamEvent.
@@ -11,10 +11,11 @@ export function isResponseStreamEvent(ev: unknown): ev is Responses.ResponseStre
   if (!isObject(ev)) {
     return false;
   }
-  if (!("type" in ev)) {
+  const record = asRecord(ev);
+  if (!("type" in record)) {
     return false;
   }
-  const t = asRecord(ev).type;
+  const t = record.type;
   return isString(t);
 }
 
