@@ -135,27 +135,21 @@ export function createNodeFsAdapter(rootDir: string): PersistAdapter {
 
   const remove = async (path: PathParts, opts?: { recursive?: boolean }): Promise<void> => {
     const p = pathFor(path);
-    
-    // First check if the file/directory exists
-    let stats;
-    try {
-      stats = await fsp.stat(p);
-    } catch (error) {
+    // Check if the file/directory exists
+    const s = await fsp.stat(p).catch((error) => {
       if (isNodeError(error) && error.code === "ENOENT") {
-        // File doesn't exist, nothing to remove
-        return;
+        return undefined;
       }
       throw wrapFsError(error, "stat for remove", p);
-    }
-
+    });
+    if (!s) { return; }
     try {
-      if (stats.isDirectory()) {
+      if (s.isDirectory()) {
         await fsp.rm(p, { recursive: opts?.recursive ?? true, force: true });
       } else {
         await fsp.unlink(p);
       }
     } catch (error) {
-      // Ignore ENOENT errors (file was already removed)
       if (!isNodeError(error) || error.code !== "ENOENT") {
         throw wrapFsError(error, "remove", p);
       }
@@ -192,14 +186,9 @@ export function createNodeFsAdapter(rootDir: string): PersistAdapter {
     }
     
     // Get source stats
-    let stats;
-    try {
-      stats = await fsp.stat(src);
-    } catch (error) {
-      throw wrapFsError(error, "stat source for copy", src);
-    }
+    const s = await fsp.stat(src).catch((error) => { throw wrapFsError(error, "stat source for copy", src); });
     
-    if (stats.isDirectory()) {
+    if (s.isDirectory()) {
       // Create destination directory
       try {
         await fsp.mkdir(dst, { recursive: true });
@@ -208,12 +197,9 @@ export function createNodeFsAdapter(rootDir: string): PersistAdapter {
       }
       
       // Read source directory entries
-      let entries;
-      try {
-        entries = await fsp.readdir(src, { withFileTypes: true });
-      } catch (error) {
+      const entries = await fsp.readdir(src, { withFileTypes: true }).catch((error) => {
         throw wrapFsError(error, "read source directory", src);
-      }
+      });
       
       // Copy each entry
       for (const e of entries) {

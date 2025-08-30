@@ -15,6 +15,9 @@ export type TextDoneEvent = {
 /**
  * Handles text done events for function output.
  */
+/**
+ * Signals completion of function output text and optionally logs it.
+ */
 export const handleTextDone: StreamEventHandler<TextDoneEvent> = async (
   event,
   context
@@ -47,7 +50,9 @@ export const handleTextDone: StreamEventHandler<TextDoneEvent> = async (
   }
 };
 
-// Back-compat alias (used in some specs): operates on a simple accumulator
+/**
+ * Back-compat alias for unit specs: resets a simple `{ accumulated }` object.
+ */
 export function handleTextDoneEvent(
   event: { text?: string },
   acc: { accumulated: string },

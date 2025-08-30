@@ -16,7 +16,9 @@ type ActionFrom<T> = T extends { normalize: (p: Record<string, unknown>) => infe
   ? NonNullable<A>
   : never;
 
-// function.name でキー付けした辞書
+/**
+ * function.name をキーにした辞書（単一の合成ポイント）。
+ */
 const actionsByName = {
   [create_dir.function.name]: create_dir,
   [create_file.function.name]: create_file,
@@ -32,14 +34,17 @@ export type ToolName = keyof typeof actionsByName;
 export type ToolSpec = (typeof actionsByName)[ToolName]["function"];
 export type ToolAction = ActionFrom<(typeof actionsByName)[ToolName]>;
 
+/** True when the provided string is a supported tool name. */
 export function isToolName(x: string): x is ToolName {
   return x in actionsByName;
 }
 
+/** Builds the tool spec list for agent initialization. */
 export function getOpenAIToolsSpec(): ToolSpec[] {
   return Object.values(actionsByName).map((a) => a.function);
 }
 
+/** Normalizes raw function_call inputs into a typed ToolAction. */
 export function normalizeAction(name: string, params: Record<string, unknown>): ToolAction | undefined {
   if (!isToolName(name)) {
     return undefined;
@@ -48,6 +53,7 @@ export function normalizeAction(name: string, params: Record<string, unknown>): 
   return impl.normalize(params) as ToolAction | undefined;
 }
 
+/** Applies a ToolAction to the FsState (pure reducer). */
 export function reduceFs(state: FsState, action: ToolAction): string | void | boolean {
   const impl = actionsByName[action.type as ToolName];
   if (!impl) {

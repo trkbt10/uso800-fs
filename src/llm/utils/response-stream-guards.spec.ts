@@ -1,3 +1,6 @@
+/**
+ * @file Unit tests for re-exported response stream guards.
+ */
 import type { Responses } from "openai/resources/responses/responses";
 import {
   isResponseStreamEvent,

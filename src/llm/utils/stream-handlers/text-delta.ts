@@ -16,6 +16,9 @@ export type TextDeltaEvent = {
 /**
  * Handles text delta events for function output.
  */
+/**
+ * Accumulates function output text deltas and optionally logs them.
+ */
 export const handleTextDelta: StreamEventHandler<TextDeltaEvent> = async (
   event,
   context
@@ -51,7 +54,9 @@ export const handleTextDelta: StreamEventHandler<TextDeltaEvent> = async (
   }
 };
 
-// Back-compat alias (used in some specs): operates on a simple accumulator
+/**
+ * Back-compat alias for unit specs: accumulates into a simple `{ accumulated }` object.
+ */
 export function handleTextDeltaEvent(
   event: { delta?: string },
   acc: { accumulated: string },
