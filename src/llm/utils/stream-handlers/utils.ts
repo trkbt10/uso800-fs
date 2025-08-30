@@ -2,12 +2,7 @@
  * @file Utility functions for stream handlers.
  */
 
-/**
- * Check if value is an object.
- */
-export function isObject(x: unknown): x is Record<string, unknown> {
-  return typeof x === "object" && x !== null;
-}
+import { isObject } from "../response-guards/common";
 
 /**
  * Safely parse JSON string to object.
@@ -18,7 +13,7 @@ export function safeParseJsonObject(text: string): Record<string, unknown> | und
     if (!isObject(obj)) {
       return undefined;
     }
-    return obj as Record<string, unknown>;
+    return obj;
   } catch {
     return undefined;
   }

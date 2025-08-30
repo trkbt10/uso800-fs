@@ -12,16 +12,16 @@ import { safeParseJsonObject, hasAbort } from "./utils";
  */
 export const handleOutputItemDone: StreamEventHandler<Responses.ResponseOutputItemDoneEvent> = async (
   event,
-  context
+  context,
 ): Promise<HandlerResult | void> => {
   const itemData = extractOutputItem(event.item);
-  
+
   if (!isFunctionCallItem(event.item) || !itemData.id) {
     return;
   }
 
   const current = context.argsByItem.get(itemData.id);
-  
+
   if (!current) {
     return;
   }
@@ -37,7 +37,7 @@ export const handleOutputItemDone: StreamEventHandler<Responses.ResponseOutputIt
   }
 
   const parsed = safeParseJsonObject(itemData.arguments);
-  
+
   if (!parsed) {
     return;
   }
@@ -55,9 +55,9 @@ export const handleOutputItemDone: StreamEventHandler<Responses.ResponseOutputIt
   }
 
   // Execute the function call
-  const maybe = await context.onFunctionCall({ 
-    name: current.name ?? itemData.name, 
-    params: parsed 
+  const maybe = await context.onFunctionCall({
+    name: current.name ?? itemData.name,
+    params: parsed,
   });
 
   if (typeof maybe !== "undefined") {
@@ -70,9 +70,9 @@ export const handleOutputItemDone: StreamEventHandler<Responses.ResponseOutputIt
           // ignore abort errors
         }
       }
-      return { 
-        shouldBreak: true, 
-        result: maybe 
+      return {
+        shouldBreak: true,
+        result: maybe,
       };
     }
     return { result: maybe };
@@ -80,20 +80,35 @@ export const handleOutputItemDone: StreamEventHandler<Responses.ResponseOutputIt
 };
 
 // Back-compat alias (used in some specs): simple accumulator semantics
+/**
+ * Back-compat helper used in specs to emulate simple accumulation behavior
+ * when a function call output item is completed.
+ *
+ * - Marks `outputDone` as true
+ * - Stores the function call by `id` in `toolCalls`
+ * - Returns `{ name, arguments }` for convenience, or `undefined` otherwise
+ */
 export function handleOutputItemDoneEvent(
   event: Responses.ResponseOutputItemDoneEvent,
-  acc: { outputDone: boolean; argAccumulated: Map<string, string>; toolCalls: Map<string, { name?: string; arguments?: string; call_id?: string }> },
+  acc: {
+    outputDone: boolean;
+    argAccumulated: Map<string, string>;
+    toolCalls: Map<string, { name?: string; arguments?: string; call_id?: string }>;
+  },
 ): { name: string; arguments: string } | undefined {
   acc.outputDone = true;
   if (!event || !event.item || typeof event.item !== "object") {
     return undefined;
   }
-  const item = event.item as Responses.ResponseOutputItem;
-  if (item.type === "function_call") {
-    const fn = item as Responses.ResponseFunctionToolCall;
+  const item = event.item;
+  if (isFunctionCallItem(item)) {
+    // OpenAI types mark `id` as optional on ResponseFunctionToolCall; guard before use.
+    if (!item.id) {
+      return undefined;
+    }
     acc.argAccumulated.clear();
-    acc.toolCalls.set(fn.id, { name: fn.name, arguments: fn.arguments, call_id: fn.call_id });
-    return { name: fn.name, arguments: fn.arguments };
+    acc.toolCalls.set(item.id, { name: item.name, arguments: item.arguments, call_id: item.call_id });
+    return { name: item.name, arguments: item.arguments };
   }
   return undefined;
 }

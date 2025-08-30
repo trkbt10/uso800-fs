@@ -25,13 +25,15 @@ export function isMcpCallArgumentsDeltaEvent(ev: unknown): ev is Responses.Respo
   if (!("output_index" in candidate)) {
     return false;
   }
-  if (typeof (candidate as any).output_index !== "number") {
+  const oi = candidate.output_index;
+  if (typeof oi !== "number") {
     return false;
   }
   if (!("sequence_number" in candidate)) {
     return false;
   }
-  return typeof (candidate as any).sequence_number === "number";
+  const sn = candidate.sequence_number;
+  return typeof sn === "number";
 }
 
 /**

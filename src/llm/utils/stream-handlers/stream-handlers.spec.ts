@@ -1,7 +1,7 @@
 /**
  * @file Tests for stream event handlers.
  */
-import { describe, it, expect } from "vitest";
+// Use global describe/it/expect from test runner
 import type { Responses } from "openai/resources/responses/responses";
 import { handleTextDeltaEvent } from "./text-delta";
 import { handleTextDoneEvent } from "./text-done";
@@ -31,6 +31,8 @@ describe("Stream handlers", () => {
         delta: "Hello ",
         item_id: "item1",
         output_index: 0,
+        sequence_number: 1,
+        logprobs: [],
       };
       
       const result = handleTextDeltaEvent(event, acc);
@@ -48,6 +50,8 @@ describe("Stream handlers", () => {
         delta: "there",
         item_id: "item1",
         output_index: 0,
+        sequence_number: 2,
+        logprobs: [],
       };
       
       const result = handleTextDeltaEvent(event, acc);
@@ -63,6 +67,8 @@ describe("Stream handlers", () => {
         delta: "",
         item_id: "item1",
         output_index: 0,
+        sequence_number: 3,
+        logprobs: [],
       };
       
       const result = handleTextDeltaEvent(event, acc);
@@ -82,6 +88,8 @@ describe("Stream handlers", () => {
         text: "Complete text message",
         item_id: "item1",
         output_index: 0,
+        sequence_number: 4,
+        logprobs: [],
       };
       
       const result = handleTextDoneEvent(event, acc);
@@ -99,6 +107,8 @@ describe("Stream handlers", () => {
         text: "",
         item_id: "item1",
         output_index: 0,
+        sequence_number: 5,
+        logprobs: [],
       };
       
       const result = handleTextDoneEvent(event, acc);
@@ -133,20 +143,21 @@ describe("Stream handlers", () => {
       expect(acc.outputDone).toBe(true);
     });
     
-    it("should handle text output item", () => {
+    it("should handle non-function output item (message)", () => {
       const acc = createMockAccumulator();
-      const textItem: Responses.ResponseMessageContentTextOutput = {
-        type: "text",
-        text: "Output text",
+      const message: Responses.ResponseOutputMessage = {
+        type: "message",
+        id: "m1",
+        content: [],
+        role: "assistant",
+        status: "completed",
       };
-      
       const event: Responses.ResponseOutputItemDoneEvent = {
         type: "response.output_item.done",
-        item: textItem,
+        item: message as Responses.ResponseOutputItem,
         output_index: 0,
         sequence_number: 1,
       };
-      
       const result = handleOutputItemDoneEvent(event, acc);
       expect(result).toBeUndefined();
       expect(acc.outputDone).toBe(true);
@@ -201,20 +212,21 @@ describe("Stream handlers", () => {
       expect(storedCall?.call_id).toBe("call789");
     });
     
-    it("should handle items without type", () => {
+    it("should ignore non-function item types", () => {
       const acc = createMockAccumulator();
-      const unknownItem = {
-        id: "unknown123",
-        // no type field
-      } as unknown as Responses.ResponseOutputItem;
-      
+      const message: Responses.ResponseOutputMessage = {
+        type: "message",
+        id: "m2",
+        content: [],
+        role: "assistant",
+        status: "in_progress",
+      };
       const event: Responses.ResponseOutputItemDoneEvent = {
         type: "response.output_item.done",
-        item: unknownItem,
+        item: message as Responses.ResponseOutputItem,
         output_index: 0,
         sequence_number: 1,
       };
-      
       const result = handleOutputItemDoneEvent(event, acc);
       expect(result).toBeUndefined();
       expect(acc.outputDone).toBe(true);

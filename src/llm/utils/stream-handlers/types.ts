@@ -58,3 +58,12 @@ export type StreamEventHandler<E = Responses.ResponseStreamEvent, T = unknown> =
   event: E,
   context: StreamHandlerContext<T>
 ) => Promise<HandlerResult<T> | void> | HandlerResult<T> | void;
+
+// Test helper accumulator type (used by unit specs)
+export type StreamAccumulator = {
+  accumulated: string;
+  argAccumulated: Map<string, string>;
+  itemAdded: boolean;
+  outputDone: boolean;
+  toolCalls: Map<string, { name?: string; arguments?: string; call_id?: string }>;
+};
