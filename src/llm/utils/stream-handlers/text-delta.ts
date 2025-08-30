@@ -50,3 +50,13 @@ export const handleTextDelta: StreamEventHandler<TextDeltaEvent> = async (
     });
   }
 };
+
+// Back-compat alias (used in some specs): operates on a simple accumulator
+export function handleTextDeltaEvent(
+  event: { delta?: string },
+  acc: { accumulated: string },
+): string {
+  const d = typeof event.delta === "string" ? event.delta : "";
+  acc.accumulated = (acc.accumulated ?? "") + d;
+  return d;
+}

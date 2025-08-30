@@ -9,7 +9,7 @@ import type { PersistAdapter, PathParts, Stat } from "./types";
  * Check if error is a Node.js system error with a code property.
  */
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {
-  return error instanceof Error && "code" in error;
+  return error instanceof Error ? "code" in error : false;
 }
 
 /**

@@ -187,7 +187,7 @@ describe("persist/NodeFsAdapter", () => {
     const entries = await fsp.readdir(tempRoot, { withFileTypes: true });
     
     const cleanupPromises = entries
-      .filter(entry => entry.isDirectory() && entry.name.startsWith(testDirPrefix))
+      .filter(entry => entry.isDirectory() ? entry.name.startsWith(testDirPrefix) : false)
       .map(entry => cleanupTempDir(join(tempRoot, entry.name)));
     
     await Promise.all(cleanupPromises);

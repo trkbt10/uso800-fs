@@ -12,14 +12,12 @@ export function isRefusalDeltaEvent(ev: unknown): ev is Responses.ResponseRefusa
     return false;
   }
   const candidate = asRecord(ev);
-  if (!("delta" in candidate)) {return false;}
-  if (!isString(candidate.delta)) {return false;}
-  if (!("content_index" in candidate)) {return false;}
-  if (!isNumber(candidate.content_index)) {return false;}
-  if (!("item_id" in candidate)) {return false;}
-  if (!isString(candidate.item_id)) {return false;}
-  if (!("output_index" in candidate)) {return false;}
-  return isNumber(candidate.output_index);
+  if (!("delta" in candidate) || !isString(candidate.delta)) {return false;}
+  // content_index may be omitted; when present it must be number
+  if ("content_index" in candidate && !isNumber(candidate.content_index)) {return false;}
+  if (!("item_id" in candidate) || !isString(candidate.item_id)) {return false;}
+  if (!("output_index" in candidate) || !isNumber(candidate.output_index)) {return false;}
+  return true;
 }
 
 /**

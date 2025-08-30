@@ -46,3 +46,13 @@ export const handleTextDone: StreamEventHandler<TextDoneEvent> = async (
     });
   }
 };
+
+// Back-compat alias (used in some specs): operates on a simple accumulator
+export function handleTextDoneEvent(
+  event: { text?: string },
+  acc: { accumulated: string },
+): string {
+  const text = typeof event.text === "string" ? event.text : "";
+  acc.accumulated = "";
+  return text;
+}

@@ -8,7 +8,10 @@ import { hasTypeProp, isString, isNumber, asRecord } from "./common";
  * Type guard for ResponseFunctionCallArgumentsDeltaEvent.
  */
 export function isArgsDeltaEvent(ev: unknown): ev is Responses.ResponseFunctionCallArgumentsDeltaEvent {
-  if (!hasTypeProp(ev, "response.function_call_arguments.delta")) {
+  if (
+    !hasTypeProp(ev, "response.function_call_arguments.delta") &&
+    !hasTypeProp(ev, "response.function_call.arguments.delta")
+  ) {
     return false;
   }
   const candidate = asRecord(ev);
@@ -26,7 +29,10 @@ export function isArgsDeltaEvent(ev: unknown): ev is Responses.ResponseFunctionC
  * Type guard for ResponseFunctionCallArgumentsDoneEvent.
  */
 export function isArgsDoneEvent(ev: unknown): ev is Responses.ResponseFunctionCallArgumentsDoneEvent {
-  if (!hasTypeProp(ev, "response.function_call_arguments.done")) {
+  if (
+    !hasTypeProp(ev, "response.function_call_arguments.done") &&
+    !hasTypeProp(ev, "response.function_call.arguments.done")
+  ) {
     return false;
   }
   const candidate = asRecord(ev);

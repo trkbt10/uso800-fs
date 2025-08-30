@@ -20,14 +20,28 @@ describe("uso800fs/llm fs-llm", () => {
       responses: {
         stream: () =>
           mockStream([
-            { type: "response.output_item.added", item: { type: "function_call", id: "i1", name: "emit_fs_listing" } },
+            {
+              type: "response.output_item.added",
+              item: { type: "function_call", id: "i1", name: "emit_fs_listing" },
+              output_index: 0,
+              sequence_number: 1,
+            },
             {
               type: "response.function_call.arguments.delta",
               item_id: "i1",
               delta:
-                '{"folder":["AI"],"entries":[{"kind":"dir","name":"D"},{"kind":"file","name":"hello.txt","content":"hi","mime":"text/plain"}]}'
+                '{"folder":["AI"],"entries":[{"kind":"dir","name":"D"},{"kind":"file","name":"hello.txt","content":"hi","mime":"text/plain"}]}',
+              output_index: 0,
+              sequence_number: 2,
             },
-            { type: "response.function_call.arguments.done", item_id: "i1" },
+            {
+              type: "response.function_call.arguments.done",
+              item_id: "i1",
+              arguments:
+                '{"folder":["AI"],"entries":[{"kind":"dir","name":"D"},{"kind":"file","name":"hello.txt","content":"hi","mime":"text/plain"}]}',
+              output_index: 0,
+              sequence_number: 3,
+            },
           ]),
       },
     };
@@ -43,13 +57,26 @@ describe("uso800fs/llm fs-llm", () => {
       responses: {
         stream: () =>
           mockStream([
-            { type: "response.output_item.added", item: { type: "function_call", id: "i1", name: "emit_file_content" } },
+            {
+              type: "response.output_item.added",
+              item: { type: "function_call", id: "i1", name: "emit_file_content" },
+              output_index: 0,
+              sequence_number: 1,
+            },
             {
               type: "response.function_call.arguments.delta",
               item_id: "i1",
               delta: '{"path":["Docs","note.md"],"content":"Hello Files","mime":"text/markdown"}',
+              output_index: 0,
+              sequence_number: 2,
             },
-            { type: "response.function_call.arguments.done", item_id: "i1" },
+            {
+              type: "response.function_call.arguments.done",
+              item_id: "i1",
+              arguments: '{"path":["Docs","note.md"],"content":"Hello Files","mime":"text/markdown"}',
+              output_index: 0,
+              sequence_number: 3,
+            },
           ]),
       },
     };

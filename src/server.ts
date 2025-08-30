@@ -1,11 +1,11 @@
 #!/usr/bin/env bun
 /**
- * Hono-based HTTP server with WebDAV endpoints backed by a virtual fake filesystem.
+ * @file Hono-based HTTP server with WebDAV endpoints backed by a virtual fake filesystem.
  *
  * Requires: bun add hono
  */
 import { Hono } from "hono";
-import { createFsState, toPlain, fromPlain } from "./fakefs/state";
+import { createFsState, toPlain, fromPlain, type FsState, type FsEntry } from "./fakefs/state";
 import { handleOptions, handlePropfind, handleMkcol, handleGet, handleHead } from "./hono-middleware-webdav/handler";
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
@@ -37,15 +37,20 @@ function parseArgs(argv: string[]) {
   return out;
 }
 
-function loadState(path?: string) {
+function loadState(path?: string): { state: FsState; statePath?: string } {
   if (path && existsSync(path)) {
     const raw = JSON.parse(readFileSync(path, "utf8"));
-    return { state: fromPlain(raw), statePath: path };
+    const root = fromPlain(raw);
+    // Ensure root is a directory
+    if (root.type !== "dir") {
+      throw new Error("Invalid state file: root must be a directory");
+    }
+    return { state: { root }, statePath: path };
   }
   return { state: createFsState(), statePath: path };
 }
 
-function saveState(state: ReturnType<typeof loadState>["state"], path?: string) {
+function saveState(state: FsState, path?: string) {
   if (!path) {return;}
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, JSON.stringify(toPlain(state.root), null, 2));
@@ -67,23 +72,22 @@ app.all("*", async (c, next) => {
 app.options("/*", (c) => {
   const res = handleOptions();
   for (const [k, v] of Object.entries(res.headers ?? {})) {c.header(k, v);}
-  return c.body(res.body ?? "", res.status);
+  return c.body(res.body || "", res.status);
 });
 
-app
-  .route("/*")
-  .get((c) => {
-    const p = c.req.path;
-    const res = handleGet(state, p);
-    for (const [k, v] of Object.entries(res.headers ?? {})) {c.header(k, v);}
-    return c.body(res.body ?? "", res.status);
-  })
-  .head((c) => {
-    const p = c.req.path;
-    const res = handleHead(state, p);
-    for (const [k, v] of Object.entries(res.headers ?? {})) {c.header(k, v);}
-    return c.body("", res.status);
-  });
+app.get("/*", (c) => {
+  const p = c.req.path;
+  const res = handleGet(state, p);
+  for (const [k, v] of Object.entries(res.headers ?? {})) {c.header(k, v);}
+  return c.body(res.body || "", res.status);
+});
+
+app.on("HEAD", "/*", (c) => {
+  const p = c.req.path;
+  const res = handleHead(state, p);
+  for (const [k, v] of Object.entries(res.headers ?? {})) {c.header(k, v);}
+  return c.body("", res.status);
+});
 
 // WebDAV-specific methods via c.req.method
 app.use("/*", async (c, next) => {
@@ -93,13 +97,13 @@ app.use("/*", async (c, next) => {
     const depth = c.req.header("Depth") ?? null;
     const res = handlePropfind(state, p, depth);
     for (const [k, v] of Object.entries(res.headers ?? {})) {c.header(k, v);}
-    return c.body(res.body ?? "", res.status);
+    return c.body(res.body || "", res.status);
   }
   if (method === "MKCOL") {
     const res = handleMkcol(state, p);
     for (const [k, v] of Object.entries(res.headers ?? {})) {c.header(k, v);}
     saveState(state, statePath);
-    return c.body(res.body ?? "", res.status);
+    return c.body(res.body || "", res.status);
   }
   await next();
 });

@@ -15,7 +15,11 @@ import type { ResponseStream } from "openai/lib/responses/ResponseStream";
 import type { Stream as OpenAIStream } from "openai/core/streaming";
 
 // Minimal client surface (mirrors agents usage in usodb-llm)
-type ResponsesStreamLike = ResponseStream<unknown> | OpenAIStream<Responses.ResponseStreamEvent> | AsyncIterable<Responses.ResponseStreamEvent>;
+type ResponsesStreamLike =
+  | ResponseStream<unknown>
+  | OpenAIStream<Responses.ResponseStreamEvent>
+  | AsyncIterable<Responses.ResponseStreamEvent>
+  | AsyncIterable<unknown>;
 type StreamFunction = (opts: unknown) => ResponsesStreamLike | Promise<ResponsesStreamLike>;
 type OpenAIResponsesLike = { responses: { stream: StreamFunction } };
 
@@ -91,7 +95,7 @@ export function createUsoFsLLMInstance(
       "REQUEST=" + JSON.stringify({ path: folderPath.join("/") !== "" ? folderPath.join("/") : "/" }),
     ].join("\n\n");
     await runToolCallStreaming<void>(
-      ensureAsyncIterable(client.responses.stream({
+      ensureAsyncIterable(await client.responses.stream({
         model: args.model,
         instructions: args.instruction,
         input: [{ role: "user", content: prompt }],
@@ -119,7 +123,7 @@ export function createUsoFsLLMInstance(
       "REQUEST=" + JSON.stringify({ path: pathParts.join("/") !== "" ? pathParts.join("/") : "/" }),
     ].join("\n\n");
     const res = await runToolCallStreaming<string>(
-      ensureAsyncIterable(client.responses.stream({
+      ensureAsyncIterable(await client.responses.stream({
         model: args.model,
         instructions: args.instruction,
         input: [{ role: "user", content: prompt }],

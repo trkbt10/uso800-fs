@@ -21,11 +21,7 @@ import {
   handleTextDone,
 } from "./stream-handlers";
 
-import type { 
-  StreamHandlerContext, 
-  StreamHandlerOptions, 
-  FunctionCallHandler 
-} from "./stream-handlers";
+import type { StreamHandlerContext, StreamHandlerOptions, FunctionCallHandler } from "./stream-handlers";
 
 import type { Responses } from "openai/resources/responses/responses";
 
@@ -79,11 +75,11 @@ export async function runToolCallStreaming<T>(
 
     // Log all events
     if (options?.logger) {
-      await options.logger.write({ 
-        type: "stream.event", 
-        ts: new Date().toISOString(), 
-        sessionId: context.sessionId, 
-        event: ev 
+      await options.logger.write({
+        type: "stream.event",
+        ts: new Date().toISOString(),
+        sessionId: context.sessionId,
+        event: ev,
       });
     }
 

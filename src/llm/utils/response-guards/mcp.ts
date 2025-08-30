@@ -12,22 +12,26 @@ export function isMcpCallArgumentsDeltaEvent(ev: unknown): ev is Responses.Respo
     return false;
   }
   const candidate = asRecord(ev);
-  if (!("delta" in candidate)) {
+  if (!("delta" in candidate) || !isString(candidate.delta)) {
     return false;
   }
-  if (!isString(candidate.delta)) {
+  if (!("item_id" in candidate) || !isString(candidate.item_id)) {
     return false;
   }
-  if (!("item_id" in candidate)) {
+  // call_id may be omitted in some minimal streams; accept when present
+  if ("call_id" in candidate && !isString(candidate.call_id)) {
     return false;
   }
-  if (!isString(candidate.item_id)) {
+  if (!("output_index" in candidate)) {
     return false;
   }
-  if (!("call_id" in candidate)) {
+  if (typeof (candidate as any).output_index !== "number") {
     return false;
   }
-  return isString(candidate.call_id);
+  if (!("sequence_number" in candidate)) {
+    return false;
+  }
+  return typeof (candidate as any).sequence_number === "number";
 }
 
 /**

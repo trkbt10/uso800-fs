@@ -78,3 +78,22 @@ export const handleOutputItemDone: StreamEventHandler<Responses.ResponseOutputIt
     return { result: maybe };
   }
 };
+
+// Back-compat alias (used in some specs): simple accumulator semantics
+export function handleOutputItemDoneEvent(
+  event: Responses.ResponseOutputItemDoneEvent,
+  acc: { outputDone: boolean; argAccumulated: Map<string, string>; toolCalls: Map<string, { name?: string; arguments?: string; call_id?: string }> },
+): { name: string; arguments: string } | undefined {
+  acc.outputDone = true;
+  if (!event || !event.item || typeof event.item !== "object") {
+    return undefined;
+  }
+  const item = event.item as Responses.ResponseOutputItem;
+  if (item.type === "function_call") {
+    const fn = item as Responses.ResponseFunctionToolCall;
+    acc.argAccumulated.clear();
+    acc.toolCalls.set(fn.id, { name: fn.name, arguments: fn.arguments, call_id: fn.call_id });
+    return { name: fn.name, arguments: fn.arguments };
+  }
+  return undefined;
+}
