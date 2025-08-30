@@ -3,11 +3,13 @@
  */
 import { createFsAgent } from "./agent";
 import { createFsState, getEntry } from "../fakefs/state";
-import { handlePropfind, handleGet } from "../webdav/handler";
+import { handlePropfind, handleGet } from "../hono-middleware-webdav/handler";
 
 function mockStream(events: unknown[]): AsyncIterable<unknown> {
   async function* gen() {
-    for (const ev of events) yield ev;
+    for (const ev of events) {
+      yield ev;
+    }
   }
   return gen();
 }
@@ -17,7 +19,7 @@ describe("uso800fs/llm agent", () => {
     const st = createFsState();
     const client = {
       responses: {
-        stream: (_opts: unknown) =>
+        stream: () =>
           mockStream([
             { type: "response.output_item.added", item: { type: "function_call", id: "i1", name: "emit_fs_listing" } },
             {
@@ -30,7 +32,7 @@ describe("uso800fs/llm agent", () => {
           ]),
       },
     };
-    const agent = createFsAgent(client as unknown as { responses: { stream: any } }, { model: "m", state: st });
+    const agent = createFsAgent(client, { model: "m", state: st });
     await agent.runWithMock("please fabricate listing under /LLM");
     // Verify via WebDAV PROPFIND
     const r = handlePropfind(st, "/LLM", "1");
@@ -44,7 +46,7 @@ describe("uso800fs/llm agent", () => {
     const st = createFsState();
     const client = {
       responses: {
-        stream: (_opts: unknown) =>
+        stream: () =>
           mockStream([
             { type: "response.output_item.added", item: { type: "function_call", id: "i1", name: "emit_file_content" } },
             {
@@ -56,13 +58,12 @@ describe("uso800fs/llm agent", () => {
           ]),
       },
     };
-    const agent = createFsAgent(client as unknown as { responses: { stream: any } }, { model: "m", state: st });
+    const agent = createFsAgent(client, { model: "m", state: st });
     await agent.runWithMock("please fabricate content");
     const file = getEntry(st, ["Files", "note.txt"]);
-    expect(file && file.type).toBe("file");
+    expect(file?.type).toBe("file");
     const resp = handleGet(st, "/Files/note.txt");
     expect(resp.status).toBe(200);
     expect(String(resp.body)).toContain("Hello LLM");
   });
 });
-

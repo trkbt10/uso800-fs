@@ -1,5 +1,5 @@
 /**
- * Minimal WebDAV handlers for OPTIONS, PROPFIND, MKCOL, GET, HEAD.
+ * @file Minimal WebDAV handlers for OPTIONS, PROPFIND, MKCOL, GET, HEAD.
  *
  * This module is framework-agnostic: Hono routes call these functions.
  */
@@ -9,6 +9,14 @@ import { generateListingForFolder, fabricateFileContent } from "../fakefs/genera
 
 export type DavResponse = { status: number; headers?: Record<string, string>; body?: string | Uint8Array };
 
+
+
+
+
+
+/**
+ * Handle WebDAV OPTIONS request.
+ */
 export function handleOptions(): DavResponse {
   return {
     status: 200,
@@ -46,6 +54,14 @@ function propfindResponseForEntry(href: string, e: FsEntry): string {
 </D:response>`;
 }
 
+
+
+
+
+
+/**
+ * Handle WebDAV PROPFIND request.
+ */
 export function handlePropfind(state: FsState, urlPath: string, depth: string | null): DavResponse {
   const parts = splitPath(urlPath);
   const target = parts.length === 0 ? state.root : getEntry(state, parts);
@@ -54,23 +70,30 @@ export function handlePropfind(state: FsState, urlPath: string, depth: string | 
   }
   // Depth: 0 -> only self; 1 -> include children
   const selfHref = urlPath.endsWith("/") ? urlPath : urlPath + "/";
-  let xml = `<?xml version="1.0" encoding="utf-8"?>\n<D:multistatus xmlns:D="DAV:">`;
-  xml += propfindResponseForEntry(selfHref, target);
+  const xmlParts = [`<?xml version="1.0" encoding="utf-8"?>\n<D:multistatus xmlns:D="DAV:">`, propfindResponseForEntry(selfHref, target)];
   if (depth !== "0" && target.type === "dir") {
     for (const [name, child] of target.children.entries()) {
-      xml += propfindResponseForEntry(selfHref + encodeURIComponent(name) + (child.type === "dir" ? "/" : ""), child);
+      xmlParts.push(propfindResponseForEntry(selfHref + encodeURIComponent(name) + (child.type === "dir" ? "/" : ""), child));
     }
   }
-  xml += "</D:multistatus>";
-  return { status: 207, headers: { "Content-Type": "application/xml" }, body: xml };
+  xmlParts.push("</D:multistatus>");
+  return { status: 207, headers: { "Content-Type": "application/xml" }, body: xmlParts.join("") };
 }
 
+
+
+
+
+
+/**
+ * Handle WebDAV MKCOL (make collection/directory) request.
+ */
 export function handleMkcol(state: FsState, urlPath: string, opts?: { onGenerate?: (folder: string[]) => void }): DavResponse {
   const parts = splitPath(urlPath);
   if (parts.length === 0) {
     return { status: 403 };
   }
-  const dirName = parts[parts.length - 1]!;
+  // const dirName = parts[parts.length - 1]!; // Currently unused, kept for potential future use
   ensureDir(state, parts);
   // Generate mysterious entries based on name
   generateListingForFolder(state, parts);
@@ -80,6 +103,14 @@ export function handleMkcol(state: FsState, urlPath: string, opts?: { onGenerate
   return { status: 201 };
 }
 
+
+
+
+
+
+/**
+ * Handle HTTP GET request.
+ */
 export function handleGet(state: FsState, urlPath: string): DavResponse {
   const parts = splitPath(urlPath);
   const e = getEntry(state, parts);
@@ -88,14 +119,16 @@ export function handleGet(state: FsState, urlPath: string): DavResponse {
   }
   if (e.type === "dir") {
     // Return simple HTML index
-    let body = `<html><body><h1>Index of /${parts.join("/")}</h1><ul>`;
+    const bodyParts = [`<html><body><h1>Index of /${parts.join("/")}</h1><ul>`];
     for (const [k, v] of e.children.entries()) {
-      body += `<li><a href="${encodeURIComponent(k)}${v.type === "dir" ? "/" : ""}">${k}</a></li>`;
+      bodyParts.push(`<li><a href="${encodeURIComponent(k)}${v.type === "dir" ? "/" : ""}">${k}</a></li>`);
     }
-    body += "</ul></body></html>";
+    bodyParts.push("</ul></body></html>");
+    const body = bodyParts.join("");
     return { status: 200, headers: { "Content-Type": "text/html" }, body };
   }
   // file
+  // eslint-disable-next-line no-restricted-syntax -- Mutation needed for lazy content generation
   let content = e.content;
   if (!content) {
     content = fabricateFileContent(parts);
@@ -104,6 +137,14 @@ export function handleGet(state: FsState, urlPath: string): DavResponse {
   return { status: 200, headers: { "Content-Type": e.mime ?? "text/plain" }, body: content };
 }
 
+
+
+
+
+
+/**
+ * Handle HTTP HEAD request.
+ */
 export function handleHead(state: FsState, urlPath: string): DavResponse {
   const parts = splitPath(urlPath);
   const e = getEntry(state, parts);
@@ -116,19 +157,45 @@ export function handleHead(state: FsState, urlPath: string): DavResponse {
   return { status: 200, headers: { "Content-Type": e.mime ?? "text/plain", "Content-Length": String(e.size) } };
 }
 
+
+
+
+
+
+/**
+ * Handle HTTP PUT request to upload files.
+ */
 export function handlePut(state: FsState, urlPath: string, body: string, contentType?: string): DavResponse {
   const parts = splitPath(urlPath);
-  if (parts.length === 0) return { status: 400 };
+  if (parts.length === 0) {
+    return { status: 400 };
+  }
   const file = putFile(state, parts, body, contentType ?? "application/octet-stream");
   return { status: 201, headers: { "Content-Length": String(file.size), "Content-Type": file.mime ?? "application/octet-stream" } };
 }
 
+
+
+
+
+
+/**
+ * Handle HTTP DELETE request.
+ */
 export function handleDelete(state: FsState, urlPath: string): DavResponse {
   const parts = splitPath(urlPath);
   const ok = removeEntry(state, parts);
   return { status: ok ? 204 : 404 };
 }
 
+
+
+
+
+
+/**
+ * Handle WebDAV MOVE request.
+ */
 export function handleMove(state: FsState, fromPath: string, destPath: string): DavResponse {
   const from = splitPath(fromPath);
   const to = splitPath(destPath);
@@ -136,6 +203,14 @@ export function handleMove(state: FsState, fromPath: string, destPath: string): 
   return { status: ok ? 201 : 404 };
 }
 
+
+
+
+
+
+/**
+ * Handle WebDAV COPY request.
+ */
 export function handleCopy(state: FsState, fromPath: string, destPath: string): DavResponse {
   const from = splitPath(fromPath);
   const to = splitPath(destPath);

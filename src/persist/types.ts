@@ -12,7 +12,7 @@ export type Stat = {
   mtime?: string; // ISO string
 };
 
-export interface PersistAdapter {
+export type PersistAdapter = {
   ensureDir(path: PathParts): Promise<void>;
   readdir(path: PathParts): Promise<string[]>;
   stat(path: PathParts): Promise<Stat>;
@@ -22,5 +22,5 @@ export interface PersistAdapter {
   remove(path: PathParts, opts?: { recursive?: boolean }): Promise<void>;
   move(from: PathParts, to: PathParts): Promise<void>;
   copy(from: PathParts, to: PathParts): Promise<void>;
-}
+};
 

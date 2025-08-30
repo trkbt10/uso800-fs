@@ -1,11 +1,11 @@
 /**
  * @file Unit: MemoryAdapter basic file IO
  */
-import { MemoryAdapter } from "./memory";
+import { createMemoryAdapter } from "./memory";
 
 describe("persist/MemoryAdapter", () => {
   it("mkdir, write, read, move, copy, delete", async () => {
-    const a = new MemoryAdapter();
+    const a = createMemoryAdapter();
     await a.ensureDir(["d1"]);
     await a.writeFile(["d1", "a.txt"], new TextEncoder().encode("hello"));
     const list = await a.readdir(["d1"]);

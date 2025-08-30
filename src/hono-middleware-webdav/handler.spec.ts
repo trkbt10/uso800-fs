@@ -17,7 +17,7 @@ describe("webdav/handler", () => {
     const r = handleMkcol(st, "/ProjectX");
     expect(r.status).toBe(201);
     const dir = getEntry(st, ["ProjectX"]);
-    expect(dir && dir.type).toBe("dir");
+    expect(dir?.type).toBe("dir");
     const children = dir && dir.type === "dir" ? Array.from(dir.children.keys()) : [];
     expect(children.length).toBeGreaterThan(0);
   });
@@ -41,6 +41,7 @@ describe("webdav/handler", () => {
     expect(rDir.headers?.["Content-Type"]).toBe("text/html");
     // ensure a file path renders content
     const anyChild = getEntry(st, ["Alpha"]);
+    // eslint-disable-next-line no-restricted-syntax -- Needed for iterating through children to find first file
     let firstFile = "Alpha_1.txt";
     if (anyChild && anyChild.type === "dir") {
       for (const k of anyChild.children.keys()) {

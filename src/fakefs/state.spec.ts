@@ -9,7 +9,7 @@ describe("fakefs/state", () => {
     const dir = ensureDir(st, ["a", "b", "c"]);
     expect(dir.type).toBe("dir");
     const got = getEntry(st, ["a", "b", "c"]);
-    expect(got && got.type).toBe("dir");
+    expect(got?.type).toBe("dir");
   });
 
   it("putFile stores content and size and is retrievable", () => {
@@ -18,7 +18,7 @@ describe("fakefs/state", () => {
     expect(f.type).toBe("file");
     expect(f.size).toBeGreaterThan(0);
     const got = getEntry(st, ["x", "y.txt"]);
-    expect(got && got.type).toBe("file");
+    expect(got?.type).toBe("file");
     expect((got as typeof f).content).toBe("hello");
   });
 });

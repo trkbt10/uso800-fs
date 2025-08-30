@@ -5,9 +5,8 @@
  * Requires: bun add hono
  */
 import { Hono } from "hono";
-import { serve } from "hono/bun";
 import { createFsState, toPlain, fromPlain } from "./fakefs/state";
-import { handleOptions, handlePropfind, handleMkcol, handleGet, handleHead } from "./webdav/handler";
+import { handleOptions, handlePropfind, handleMkcol, handleGet, handleHead } from "./hono-middleware-webdav/handler";
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
@@ -47,7 +46,7 @@ function loadState(path?: string) {
 }
 
 function saveState(state: ReturnType<typeof loadState>["state"], path?: string) {
-  if (!path) return;
+  if (!path) {return;}
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, JSON.stringify(toPlain(state.root), null, 2));
 }
@@ -67,21 +66,22 @@ app.all("*", async (c, next) => {
 
 app.options("/*", (c) => {
   const res = handleOptions();
-  for (const [k, v] of Object.entries(res.headers ?? {})) c.header(k, v);
+  for (const [k, v] of Object.entries(res.headers ?? {})) {c.header(k, v);}
   return c.body(res.body ?? "", res.status);
 });
 
-app.route("/*")
+app
+  .route("/*")
   .get((c) => {
     const p = c.req.path;
     const res = handleGet(state, p);
-    for (const [k, v] of Object.entries(res.headers ?? {})) c.header(k, v);
+    for (const [k, v] of Object.entries(res.headers ?? {})) {c.header(k, v);}
     return c.body(res.body ?? "", res.status);
   })
   .head((c) => {
     const p = c.req.path;
     const res = handleHead(state, p);
-    for (const [k, v] of Object.entries(res.headers ?? {})) c.header(k, v);
+    for (const [k, v] of Object.entries(res.headers ?? {})) {c.header(k, v);}
     return c.body("", res.status);
   });
 
@@ -92,18 +92,20 @@ app.use("/*", async (c, next) => {
   if (method === "PROPFIND") {
     const depth = c.req.header("Depth") ?? null;
     const res = handlePropfind(state, p, depth);
-    for (const [k, v] of Object.entries(res.headers ?? {})) c.header(k, v);
+    for (const [k, v] of Object.entries(res.headers ?? {})) {c.header(k, v);}
     return c.body(res.body ?? "", res.status);
   }
   if (method === "MKCOL") {
     const res = handleMkcol(state, p);
-    for (const [k, v] of Object.entries(res.headers ?? {})) c.header(k, v);
+    for (const [k, v] of Object.entries(res.headers ?? {})) {c.header(k, v);}
     saveState(state, statePath);
     return c.body(res.body ?? "", res.status);
   }
   await next();
 });
 
-serve({ fetch: app.fetch, port: args.port });
+export default {
+  ...app,
+  port: args.port,
+};
 console.log(`[uso800fs] WebDAV server listening on 127.0.0.1:${args.port}`);
-

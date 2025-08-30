@@ -1,98 +1,76 @@
 /**
- * FS LLM Agent: consumes a mock Responses API stream and applies validated tool payloads to FS state.
+ * @file FS LLM Agent: consumes a mock Responses API stream and applies validated tool payloads to FS state.
+ *
+ * Differences from a naive approach:
+ * - Explicit tool schema validation before state mutation
+ * - Runtime type guards to avoid unsafe casts
  */
 import type { FsState } from "../fakefs/state";
-import { ensureDir, putFile, removeEntry, moveEntry, copyEntry } from "../fakefs/state";
-import { validateToolPayload, type ToolName } from "./validator";
-import { runToolCallStreaming } from "../../../src/services/usodb-llm/utils/response-stream";
+// state helpers are applied via reduceFs from tools.ts
+import { runToolCallStreaming } from "./utils/response-stream";
+import { normalizeAction, reduceFs, getOpenAIToolsSpec } from "./actions/index";
+import type { Responses } from "openai/resources/responses/responses";
+import type { ResponseStream } from "openai/lib/responses/ResponseStream";
+import type { Stream as OpenAIStream } from "openai/core/streaming";
 
 // Minimal client surface; compatible with mock streams.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- allow real OpenAI client or mock
-type ClientLike = { responses: { stream: any } };
+type ResponsesStreamLike = ResponseStream<unknown> | OpenAIStream<Responses.ResponseStreamEvent> | AsyncIterable<Responses.ResponseStreamEvent>;
+type StreamFunction = (opts: unknown) => ResponsesStreamLike | Promise<ResponsesStreamLike>;
+type ClientLike = { responses: { stream: StreamFunction } };
 
-function toolsSpec() {
-  return [
-    { type: "function", name: "create_dir", strict: true },
-    { type: "function", name: "create_file", strict: true },
-    { type: "function", name: "write_file", strict: true },
-    { type: "function", name: "remove_entry", strict: true },
-    { type: "function", name: "move_entry", strict: true },
-    { type: "function", name: "copy_entry", strict: true },
-    { type: "function", name: "emit_fs_listing", strict: true },
-    { type: "function", name: "emit_file_content", strict: true },
-  ];
+// local type helpers removed; use tools.normalizeAction instead
+
+function ensureAsyncIterable<T>(x: AsyncIterable<T> | Iterable<T>): AsyncIterable<T> {
+  if (x && typeof (x as AsyncIterable<T>)[Symbol.asyncIterator] === "function") {
+    return x as AsyncIterable<T>;
+  }
+  const it = x as Iterable<T>;
+  return {
+    async *[Symbol.asyncIterator]() {
+      for (const v of it) {
+        yield v;
+      }
+    },
+  };
 }
 
+const toolsSpec = () => getOpenAIToolsSpec();
+
+/**
+ * Creates a mock-stream-driven FS agent for unit tests and local runs.
+ *
+ * - Requires explicit client with `responses.stream`.
+ * - Mutations only occur after schema validation; unsafe casts are avoided.
+ */
 export function createFsAgent(client: ClientLike, args: { model: string; state: FsState; instruction?: string }) {
-  async function applyTool(name: ToolName, params: Record<string, unknown>) {
-    const v = validateToolPayload(name, params);
-    if (!v.ok) {
-      throw new Error(`invalid payload for ${name}: ${JSON.stringify(v.errors)}`);
-    }
-    if (name === "create_dir") {
-      ensureDir(args.state, (params.path as string[]) ?? []);
+  /** Applies a validated tool invocation to the provided FS state. */
+  async function applyTool(name: string, params: Record<string, unknown>) {
+    const action = normalizeAction(name, params);
+    if (!action) {
       return undefined;
     }
-    if (name === "create_file" || name === "write_file") {
-      const p = (params.path as string[]) ?? [];
-      const content = String(params.content ?? "");
-      const mime = typeof params.mime === "string" ? params.mime : undefined;
-      putFile(args.state, p, content, mime);
-      return undefined;
-    }
-    if (name === "remove_entry") {
-      removeEntry(args.state, (params.path as string[]) ?? []);
-      return undefined;
-    }
-    if (name === "move_entry") {
-      moveEntry(args.state, (params.from as string[]) ?? [], (params.to as string[]) ?? []);
-      return undefined;
-    }
-    if (name === "copy_entry") {
-      copyEntry(args.state, (params.from as string[]) ?? [], (params.to as string[]) ?? []);
-      return undefined;
-    }
-    if (name === "emit_fs_listing") {
-      const folder = (params.folder as string[]) ?? [];
-      const entries = Array.isArray(params.entries) ? (params.entries as Array<Record<string, unknown>>) : [];
-      ensureDir(args.state, folder);
-      for (const e of entries) {
-        if (e.kind === "dir") {
-          ensureDir(args.state, [...folder, String(e.name ?? "dir")]);
-        } else if (e.kind === "file") {
-          putFile(
-            args.state,
-            [...folder, String(e.name ?? "file")],
-            String(e.content ?? ""),
-            typeof e.mime === "string" ? e.mime : undefined,
-          );
-        }
-      }
-      return undefined;
-    }
-    if (name === "emit_file_content") {
-      const path = (params.path as string[]) ?? [];
-      const content = String(params.content ?? "");
-      const mime = typeof params.mime === "string" ? params.mime : undefined;
-      putFile(args.state, path, content, mime);
-      return undefined;
-    }
-    return undefined;
+    return reduceFs(args.state, action);
   }
 
+  /**
+   * Runs a single-turn prompt against the mock Responses stream.
+   * The first completed function_call is applied and the stream is aborted.
+   */
   async function runWithMock(prompt: string) {
     // Note: in tests, client.responses.stream is mocked to yield a single function_call
     await runToolCallStreaming<void>(
-      await client.responses.stream({
+      ensureAsyncIterable(await client.responses.stream({
         model: args.model,
         instructions: args.instruction,
         input: [{ role: "user", content: prompt }],
         tools: toolsSpec(),
         tool_choice: "required",
-      }),
+      })),
       ({ name, params }) => {
-        if (!name) return undefined;
-        return applyTool(name as ToolName, params);
+        if (!name) {
+          return undefined;
+        }
+        return applyTool(name, params);
       },
       { endAfterFirst: true },
     );

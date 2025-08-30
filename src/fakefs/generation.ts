@@ -1,7 +1,7 @@
 /**
  * Deterministic generation of directory listings and file contents from folder names.
  */
-import type { FsEntry, FsState } from "./state";
+import type { FsState } from "./state";
 import { ensureDir, putFile } from "./state";
 
 function hash(s: string): number {
@@ -22,6 +22,36 @@ function randInt(seed: number, min: number, max: number): number {
   const u = (x >>> 0) / 0xffffffff;
   return Math.floor(min + u * (max - min + 1));
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 export function generateListingForFolder(state: FsState, folderPath: string[]): void {
   const name = folderPath[folderPath.length - 1] ?? "seed";
@@ -48,8 +78,39 @@ export function generateListingForFolder(state: FsState, folderPath: string[]): 
   }
 }
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 export function fabricateFileContent(seedPath: string[]): string {
-  const base = seedPath.join("/") || "/";
+  const joinedPath = seedPath.join("/");
+  const base = joinedPath !== "" ? joinedPath : "/";
   const h = hash(base);
   const lines: string[] = [];
   lines.push(`# Uso800FS content for ${base}`);

@@ -9,7 +9,7 @@ describe("fakefs/generation", () => {
     const st = createFsState();
     generateListingForFolder(st, ["MystSeed"]);
     const dir = getEntry(st, ["MystSeed"]);
-    expect(dir && dir.type).toBe("dir");
+    expect(dir?.type).toBe("dir");
     const children = dir && dir.type === "dir" ? Array.from(dir.children.keys()) : [];
     expect(children.length).toBeGreaterThan(0);
   });
