@@ -3,13 +3,13 @@
  * @file Hono-based WebDAV app factory using PersistAdapter directly.
  */
 import { Hono, type Context } from "hono";
-import { handleOptions, type DavResponse } from "./hono-middleware-webdav/handler";
-import type { PersistAdapter } from "./persist/types";
-import { createWebDAVLogger, type WebDAVLogger } from "./logging/webdav-logger";
-// We use the provided PersistAdapter directly to avoid cache staleness
-import { buildIgnoreRegexps, isIgnoredFactory } from "./server/ignore";
+import type { DavResponse } from "./handlers/types";
+import { handleOptions } from "./handlers/options";
+import type { PersistAdapter } from "../persist/types";
+import { createWebDAVLogger, type WebDAVLogger } from "../logging/webdav-logger";
+import { buildIgnoreRegexps, isIgnoredFactory } from "./ignore";
 import {
-  handleGetRequest,
+  handleHttpGetRequest,
   handlePutRequest,
   handlePropfindRequest,
   handleMkcolRequest,
@@ -17,35 +17,28 @@ import {
   handleDeleteRequest,
   handleMoveRequest,
   handleCopyRequest,
-  createMkcolOnGenerate,
-} from "./server/handlers";
+  handleLockRequest, handleUnlockRequest, handleProppatchRequest,
+} from "./handlers";
+import type { WebDavHooks } from "./hooks";
+import { createDavStateStore } from "./dav-state";
 
-// LLM interface for generating content
-export type LlmLike = {
-  fabricateListing: (path: string[], opts?: { depth?: string | null }) => Promise<void>;
-  fabricateFileContent: (path: string[], opts?: { mimeHint?: string }) => Promise<string>;
-};
+export type LlmLike = never;
 
-/**
- * Creates a WebDAV Hono app using PersistAdapter directly.
- */
 export function makeWebdavApp(opts: {
   persist: PersistAdapter;
-  llm?: LlmLike;
+  hooks?: WebDavHooks;
   logger?: WebDAVLogger;
   ignoreGlobs?: string[];
 }) {
   const basePersist = opts.persist;
-  const llm = opts.llm;
+  const hooks = opts.hooks;
   const logger = opts.logger ?? createWebDAVLogger();
   const app = new Hono();
 
-  const ignoreRes = buildIgnoreRegexps(opts.ignoreGlobs);
+  const ignoreRes = buildIgnoreRegexps([...(opts.ignoreGlobs ?? []), "**/_dav/**"]);
   const isIgnored = isIgnoredFactory(ignoreRes);
+  const davState = createDavStateStore(basePersist);
 
-  /**
-   * Sends a DavResponse through Hono's Context with proper headers.
-   */
   function send(c: Context, res: DavResponse) {
     const status = res.status;
     const init: ResponseInit = { status, headers: res.headers };
@@ -55,7 +48,6 @@ export function makeWebdavApp(opts: {
   }
 
   app.all("*", async (c, next) => {
-    // Basic CORS and DAV headers
     c.header("DAV", "1,2");
     c.header("MS-Author-Via", "DAV");
     c.header("Allow", "OPTIONS, PROPFIND, MKCOL, GET, HEAD, PUT, DELETE, MOVE, COPY");
@@ -67,7 +59,6 @@ export function makeWebdavApp(opts: {
     return send(c, handleOptions(logger));
   });
 
-  // Small helper to short-circuit ignored paths with logging
   function maybeIgnore(c: Context, method: string): Response | null {
     const p = c.req.path;
     logger?.logInput(method, p);
@@ -83,7 +74,9 @@ export function makeWebdavApp(opts: {
     if (ignored) { return ignored; }
     const p = c.req.path;
     const persist = basePersist;
-    const result = await handleGetRequest(p, { persist, llm, logger });
+    const hdrs: Record<string, string> = {};
+    for (const [k, v] of c.req.raw.headers) { hdrs[k] = v; }
+    const result = await handleHttpGetRequest(p, hdrs, { persist, hooks, logger });
     return send(c, result.response);
   });
 
@@ -100,9 +93,14 @@ export function makeWebdavApp(opts: {
     const p = c.req.path;
     const persist = basePersist;
     const body = await c.req.arrayBuffer();
-    
-    // Use the tested handler
-    const result = await handlePutRequest(p, body, { persist, llm, logger });
+    const curLock = await davState.getLock(p);
+    if (curLock) {
+      const provided = c.req.header("Lock-Token");
+      if (!provided || provided !== curLock.token) {
+        return send(c, { status: 423 });
+      }
+    }
+    const result = await handlePutRequest(p, body, { persist, hooks, logger });
     return send(c, result.response);
   });
 
@@ -110,69 +108,85 @@ export function makeWebdavApp(opts: {
     logger?.logInput("DELETE", c.req.path);
     const p = c.req.path;
     const persist = basePersist;
+    const curLock = await davState.getLock(p);
+    if (curLock) {
+      const provided = c.req.header("Lock-Token");
+      if (!provided || provided !== curLock.token) {
+        return send(c, { status: 423 });
+      }
+    }
     const result = await handleDeleteRequest(p, { persist, logger });
     return send(c, result.response);
   });
 
-  // WebDAV-specific methods via c.req.method
   app.use("/*", async (c, next) => {
     const method = c.req.method.toUpperCase();
     const p = c.req.path;
 
     if (method === "PROPFIND") {
       const depth = c.req.header("Depth") ?? null;
-      
-      // Ignore paths return 404 to avoid spurious LIST logs for noise files
       if (isIgnored(p)) { logger?.logOutput("PROPFIND", p, 404); return send(c, { status: 404 }); }
-
       const persist = basePersist;
-      
-      // Use the tested handler with ignore filtering
-      const result = await handlePropfindRequest(p, depth, { 
-        persist, 
-        llm, 
+      const result = await handlePropfindRequest(p, depth, {
+        persist,
+        hooks,
         logger,
-        shouldIgnore: (full, base) => {
+        shouldIgnore: (full: string, base: string) => {
           if (isIgnored(full)) { return true; }
           if (isIgnored(base)) { return true; }
           return false;
         }
       });
-      
       return send(c, result.response);
     }
 
     if (method === "MKCOL") {
+      try {
+        const bodyText = await c.req.text();
+        if (bodyText && bodyText.length > 0) {
+          return send(c, { status: 415 });
+        }
+      } catch {}
       const persist = basePersist;
-      
-      // Use the tested handler with onGenerate callback
-      const onGenerate = createMkcolOnGenerate(llm);
-      const result = await handleMkcolRequest(p, { persist, llm, logger, onGenerate });
-      
+      const result = await handleMkcolRequest(p, { persist, hooks, logger });
+      return send(c, result.response);
+    }
+
+    if (method === "LOCK") {
+      const result = await handleLockRequest(p, { persist: basePersist, logger });
+      return send(c, result.response);
+    }
+
+    if (method === "UNLOCK") {
+      const sent = c.req.header("Lock-Token") ?? "";
+      const token = sent ? sent : undefined;
+      const result = await handleUnlockRequest(p, token, { persist: basePersist, logger });
+      return send(c, result.response);
+    }
+
+    if (method === "PROPPATCH") {
+      const body = await c.req.text();
+      const result = await handleProppatchRequest(p, body, { persist: basePersist, logger });
       return send(c, result.response);
     }
 
     if (method === "MOVE") {
       const destination = c.req.header("Destination");
-      if (!destination) {
-        return send(c, { status: 400 });
-      }
-
+      if (!destination) { return send(c, { status: 400 }); }
+      const overwrite = (c.req.header("Overwrite") ?? "T").toUpperCase() !== "F";
       const persist = basePersist;
       const destUrl = new URL(destination);
-      const result = await handleMoveRequest(p, destUrl.pathname, { persist, logger });
+      const result = await handleMoveRequest(p, destUrl.pathname, { persist, logger, overwrite });
       return send(c, result.response);
     }
 
     if (method === "COPY") {
       const destination = c.req.header("Destination");
-      if (!destination) {
-        return send(c, { status: 400 });
-      }
-
+      if (!destination) { return send(c, { status: 400 }); }
+      const overwrite = (c.req.header("Overwrite") ?? "T").toUpperCase() !== "F";
       const persist = basePersist;
       const destUrl = new URL(destination);
-      const result = await handleCopyRequest(p, destUrl.pathname, { persist, logger });
+      const result = await handleCopyRequest(p, destUrl.pathname, { persist, logger, overwrite });
       return send(c, result.response);
     }
 
@@ -181,3 +195,4 @@ export function makeWebdavApp(opts: {
 
   return app;
 }
+

@@ -24,12 +24,14 @@ export function toEntries(
   for (const item of value) {
     if (item && typeof item === "object") {
       const rec = item as Record<string, unknown>;
-      const kind = rec["kind"];
+      const kind = (rec["kind"] ?? rec["type"]) as unknown;
       const name = rec["name"];
       if ((kind === "dir" || kind === "file") && typeof name === "string") {
         const contentVal = rec["content"];
         const mimeVal = rec["mime"];
-        if (typeof contentVal === "string" && typeof mimeVal === "string") {
+        if (kind === "dir") {
+          out.push({ kind, name, content: "", mime: "" });
+        } else if (typeof contentVal === "string" && typeof mimeVal === "string") {
           out.push({ kind, name, content: contentVal, mime: mimeVal });
         }
       }

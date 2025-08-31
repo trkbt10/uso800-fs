@@ -5,6 +5,9 @@
 import { serve } from "@hono/node-server";
 import createApp from "./index";
 import { pathToFileURL } from "node:url";
+import { createTrackStore } from "./ink/store";
+import { runInkUI } from "./ink/ui";
+import type { Tracker } from "./logging/tracker";
 
 function showHelp() {
   console.log(`
@@ -92,10 +95,16 @@ function parseCli(argv: string[]) {
   return out;
 }
 
+interface AppWithPortAndTracker {
+  fetch: (req: Request) => Response | Promise<Response>;
+  port: number;
+  tracker?: Tracker;
+}
+
 /**
  * Starts the application from the command line interface.
  */
-export function startFromCli() {
+export function startFromCli(): AppWithPortAndTracker {
   /**
    * Parses CLI args and returns a Hono-compatible app object with a port.
    * Does not start the HTTP server; caller decides how to serve it.
@@ -109,21 +118,18 @@ export function startFromCli() {
   }
 
   // Optional UI tracker hookup
-  let tracker: import("./logging/tracker").Tracker | undefined;
-  if (args.ui) {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const storeMod = require("./ink/store");
-    const created = storeMod.createTrackStore();
-    tracker = created.tracker;
-    // eslint-disable-next-line @typescript-eslint/no-floating-promises
-    (async () => {
+  const uiContext = args.ui ? createTrackStore() : undefined;
+  const tracker = uiContext?.tracker;
+  
+  if (uiContext) {
+    // Start UI asynchronously
+    setTimeout(() => {
       try {
-        const ui = await import("./ink/ui");
-        ui.runInkUI(created.globalStore);
+        runInkUI(uiContext.globalStore);
       } catch (e) {
         console.warn("[uso800fs] UI unavailable:", (e as Error)?.message ?? e);
       }
-    })();
+    }, 0);
   }
 
   const app = createApp({
@@ -139,7 +145,7 @@ export function startFromCli() {
     throw new Error("Hono app is missing fetch");
   }
   const port = typeof args.port === "number" && !Number.isNaN(args.port) ? args.port : 8787;
-  return { ...maybeApp, port } as { fetch: HonoLike["fetch"]; port: number };
+  return { ...maybeApp, port, tracker } as AppWithPortAndTracker;
 }
 
 type HonoLike = {
@@ -157,17 +163,12 @@ if (import.meta && typeof import.meta.url === "string") {
   const isMain = entry ? import.meta.url === pathToFileURL(entry).toString() : false;
   if (isMain) {
     const appWithPort = startFromCli();
-    serve({ fetch: appWithPort.fetch!.bind(appWithPort), port: appWithPort.port, hostname: "127.0.0.1" });
+    serve({ fetch: appWithPort.fetch.bind(appWithPort), port: appWithPort.port, hostname: "127.0.0.1" });
     const args = parseCli(process.argv.slice(2));
     if (args.ui) {
-      try {
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const storeMod = require("./ink/store");
-        const state = storeMod.globalStore?.getState?.();
-        const tracker = (storeMod.createTrackStore?.() ?? {}).tracker;
-        tracker?.track("app.port", { host: "127.0.0.1", port: appWithPort.port });
-      } catch {
-        // ignore
+      // If UI mode, track the port info using the tracker from startFromCli
+      if (appWithPort.tracker) {
+        appWithPort.tracker.track("app.port", { host: "127.0.0.1", port: appWithPort.port });
       }
     } else {
       console.log(`[uso800fs] WebDAV server listening on 127.0.0.1:${appWithPort.port}`);

@@ -1,7 +1,7 @@
 /**
  * @file Unit tests for MKCOL handler (co-located)
  */
-import { handleMkcolRequest } from "../handlers";
+import { handleMkcolRequest } from "../../webdav/handlers";
 import { createMemoryAdapter } from "../../persist/memory";
 import type { WebDAVLogger } from "../../logging/webdav-logger";
 import type { WebDavHooks } from "../../webdav/hooks";
@@ -35,12 +35,12 @@ describe("MKCOL handler", () => {
   it("runs afterMkcol hook", async () => {
     const persist = createMemoryAdapter();
     const logger = createLogger();
-    let called = 0;
+    const calls: number[] = [];
     const hooks: WebDavHooks = {
-      async afterMkcol() { called += 1; }
+      async afterMkcol() { calls.push(1); }
     };
     await handleMkcolRequest("/with-callback", { persist, logger, hooks });
-    expect(called).toBe(1);
+    expect(calls.length).toBe(1);
   });
 
   it("returns 409 when parent missing", async () => {

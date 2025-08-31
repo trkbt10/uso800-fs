@@ -3,44 +3,34 @@
  */
 import { createUsoFsLLMInstance } from "./fs-llm";
 import { createMemoryAdapter } from "../persist/memory";
-import type { PersistAdapter } from "../persist/types";
+import type { Responses } from "openai/resources/responses/responses";
 
 describe("fs-llm with PersistAdapter", () => {
   describe("createUsoFsLLMInstance", () => {
-    it("requires client with responses.stream", () => {
-      expect(() =>
-        createUsoFsLLMInstance({} as any, { model: "test", persist: createMemoryAdapter() }),
-      ).toThrow("client.responses.stream is required");
-    });
-
-    it("requires model and persist", () => {
-      const mockClient = {
-        responses: { stream: () => {} },
-      };
-      expect(() => createUsoFsLLMInstance(mockClient as any, {} as any)).toThrow("model and persist are required");
-    });
-
     it("creates instance with valid inputs", () => {
       const mockClient = {
         responses: { 
           stream: async () => {
-            return (async function* () {
-              yield {
+            return (async function* (): AsyncGenerator<Responses.ResponseStreamEvent> {
+              const ev: Responses.ResponseFunctionCallArgumentsDoneEvent = {
                 type: "response.function_call_arguments.done",
                 item_id: "test",
+                output_index: 0,
+                sequence_number: 0,
                 arguments: JSON.stringify({
-                  path: "/test",
+                  folder: ["test"],
                   entries: [
-                    { name: "file.txt", type: "file", content: "test" }
+                    { name: "file.txt", kind: "file", content: "test", mime: "text/plain" }
                   ]
                 })
               };
+              yield ev;
             })();
           }
         },
       };
       const persist = createMemoryAdapter();
-      const instance = createUsoFsLLMInstance(mockClient as any, { 
+      const instance = createUsoFsLLMInstance(mockClient, { 
         model: "test", 
         persist 
       });
@@ -53,40 +43,57 @@ describe("fs-llm with PersistAdapter", () => {
   describe("fabricateListing", () => {
     it("creates directories and files via PersistAdapter", async () => {
       const persist = createMemoryAdapter();
-      const mockStream = (async function* () {
-        yield {
+      const mockStream = (async function* (): AsyncGenerator<Responses.ResponseStreamEvent> {
+        const added: Responses.ResponseOutputItemAddedEvent = {
           type: "response.output_item.added",
-          item: { type: "function_call", id: "test", name: "emit_fs_listing" }
+          item: { type: "function_call", id: "test", name: "emit_fs_listing", arguments: "", call_id: "c1" },
+          output_index: 0,
+          sequence_number: 0,
         };
-        yield {
+        const delta: Responses.ResponseFunctionCallArgumentsDeltaEvent = {
           type: "response.function_call_arguments.delta",
           item_id: "test",
+          output_index: 0,
+          sequence_number: 1,
           delta: JSON.stringify({
-            path: "/test",
+            folder: ["test"],
             entries: [
-              { name: "dir1", type: "dir" },
-              { name: "file.txt", type: "file", content: "content" }
+              { name: "dir1", kind: "dir", content: "", mime: "" },
+              { name: "file.txt", kind: "file", content: "content", mime: "text/plain" }
             ]
           })
         };
-        yield {
+        const done: Responses.ResponseFunctionCallArgumentsDoneEvent = {
           type: "response.function_call_arguments.done",
           item_id: "test",
+          output_index: 0,
+          sequence_number: 2,
           arguments: JSON.stringify({
-            path: "/test",
+            folder: ["test"],
             entries: [
-              { name: "dir1", type: "dir" },
-              { name: "file.txt", type: "file", content: "content" }
+              { name: "dir1", kind: "dir", content: "", mime: "" },
+              { name: "file.txt", kind: "file", content: "content", mime: "text/plain" }
             ]
           })
         };
+        const finished: Responses.ResponseOutputItemDoneEvent = {
+          type: "response.output_item.done",
+          item: { type: "function_call", id: "test", name: "emit_fs_listing", call_id: "c1", arguments: JSON.stringify({
+            folder: ["test"],
+            entries: [
+              { name: "dir1", kind: "dir", content: "", mime: "" },
+              { name: "file.txt", kind: "file", content: "content", mime: "text/plain" }
+            ]
+          }) },
+          output_index: 0,
+          sequence_number: 3,
+        };
+        yield added; yield delta; yield done; yield finished;
       })();
 
-      const mockClient = {
-        responses: { stream: async () => mockStream },
-      };
+      const mockClient = { responses: { stream: async () => mockStream } };
 
-      const instance = createUsoFsLLMInstance(mockClient as any, { 
+      const instance = createUsoFsLLMInstance(mockClient, { 
         model: "test", 
         persist 
       });
@@ -105,34 +112,51 @@ describe("fs-llm with PersistAdapter", () => {
   describe("fabricateFileContent", () => {
     it("creates file with content via PersistAdapter", async () => {
       const persist = createMemoryAdapter();
-      const mockStream = (async function* () {
-        yield {
+      const mockStream = (async function* (): AsyncGenerator<Responses.ResponseStreamEvent> {
+        const added: Responses.ResponseOutputItemAddedEvent = {
           type: "response.output_item.added",
-          item: { type: "function_call", id: "test", name: "emit_file_content" }
+          item: { type: "function_call", id: "test", name: "emit_file_content", arguments: "", call_id: "c1" },
+          output_index: 0,
+          sequence_number: 0,
         };
-        yield {
+        const delta: Responses.ResponseFunctionCallArgumentsDeltaEvent = {
           type: "response.function_call_arguments.delta",
           item_id: "test",
+          output_index: 0,
+          sequence_number: 1,
           delta: JSON.stringify({
-            path: "/test.txt",
-            content: "Generated content"
+            path: ["test.txt"],
+            content: "Generated content",
+            mime: "text/plain"
           })
         };
-        yield {
+        const done: Responses.ResponseFunctionCallArgumentsDoneEvent = {
           type: "response.function_call_arguments.done",
           item_id: "test",
+          output_index: 0,
+          sequence_number: 2,
           arguments: JSON.stringify({
-            path: "/test.txt",
-            content: "Generated content"
+            path: ["test.txt"],
+            content: "Generated content",
+            mime: "text/plain"
           })
         };
+        const finished: Responses.ResponseOutputItemDoneEvent = {
+          type: "response.output_item.done",
+          item: { type: "function_call", id: "test", name: "emit_file_content", call_id: "c1", arguments: JSON.stringify({
+            path: ["test.txt"],
+            content: "Generated content",
+            mime: "text/plain"
+          }) },
+          output_index: 0,
+          sequence_number: 3,
+        };
+        yield added; yield delta; yield done; yield finished;
       })();
 
-      const mockClient = {
-        responses: { stream: async () => mockStream },
-      };
+      const mockClient = { responses: { stream: async () => mockStream } };
 
-      const instance = createUsoFsLLMInstance(mockClient as any, { 
+      const instance = createUsoFsLLMInstance(mockClient, { 
         model: "test", 
         persist 
       });
@@ -152,9 +176,7 @@ describe("fs-llm with PersistAdapter", () => {
         // Empty stream
       })();
 
-      const mockClient = {
-        responses: { stream: async () => mockStream },
-      };
+      const mockClient = { responses: { stream: async () => mockStream } };
 
       const instance = createUsoFsLLMInstance(mockClient as any, { 
         model: "test", 

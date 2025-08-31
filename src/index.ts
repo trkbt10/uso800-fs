@@ -6,11 +6,12 @@ import { createMemoryAdapter } from "./persist/memory";
 import { createNodeFsAdapter } from "./persist/node-fs";
 import { createDataLoaderAdapter } from "./persist/dataloader-adapter";
 import type { PersistAdapter } from "./persist/types";
-import { makeWebdavApp, type LlmLike } from "./server";
+import { makeWebdavApp } from "./webdav/server";
 import { createWebDAVLogger } from "./logging/webdav-logger";
 import type { Tracker } from "./logging/tracker";
 import { createConsoleTracker } from "./logging/tracker";
 import { createUsoFsLLMInstance } from "./llm/fs-llm";
+import { createLlmWebDavHooks } from "./llm/webdav-hooks";
 
 /**
  * App initialization options.
@@ -60,16 +61,13 @@ function createPersistAdapter(options: AppInitOptions, tracker?: Tracker): Persi
 /**
  * Creates LLM instance if API key and model are provided.
  */
-function createLlm(options: AppInitOptions, persist: PersistAdapter, tracker: Tracker): LlmLike {
+function createLlm(options: AppInitOptions, persist: PersistAdapter, tracker?: Tracker) {
   const apiKey = options.apiKey ?? process.env.OPENAI_API_KEY;
   const model = options.model ?? process.env.OPENAI_MODEL;
   const instruction = buildAbsurdInstruction(options.instruction);
 
-  if (!apiKey) {
-    throw new Error("OPENAI_API_KEY is required (provide via options.apiKey or environment)");
-  }
-  if (!model) {
-    throw new Error("OPENAI_MODEL is required (provide via options.model or environment)");
+  if (!apiKey || !model) {
+    return null;
   }
 
   const client = new OpenAI({ apiKey });
@@ -87,7 +85,7 @@ function createLlm(options: AppInitOptions, persist: PersistAdapter, tracker: Tr
   };
 
   if (!hasResponsesStream(client)) {
-    throw new Error("OpenAI client missing responses.stream API");
+    return null;
   }
 
   if (!(options.tracker)) console.log("[uso800fs] LLM enabled with model:", model);
@@ -101,13 +99,14 @@ function createLlm(options: AppInitOptions, persist: PersistAdapter, tracker: Tr
 export function createApp(options: AppInitOptions = {}) {
   // Show warning if old state option is used
   if (options.state && !options.persistRoot) {
+    console.warn("[uso800fs]          Without --persist-root, changes will NOT be saved.");
     console.warn("[uso800fs] Warning: --state option is deprecated. Use --persist-root instead.");
-    console.warn("[uso800fs]          State files are no longer used; data is managed by PersistAdapter.");
   }
   
-  const tracker = options.tracker ?? createConsoleTracker();
+  const tracker = options.tracker ?? undefined;
   const persist = createPersistAdapter(options, tracker);
   const llm = createLlm(options, persist, tracker);
+  const hooks = llm ? createLlmWebDavHooks(llm) : undefined;
   const logger = createWebDAVLogger(tracker);
 
   // Bootstrap: On first boot with LLM enabled, fabricate an initial root listing
@@ -134,7 +133,7 @@ export function createApp(options: AppInitOptions = {}) {
     // Ignore bootstrap unhandled rejections deliberately
   });
 
-  return makeWebdavApp({ persist, llm, logger, ignoreGlobs: options.ignore });
+  return makeWebdavApp({ persist, hooks, logger, ignoreGlobs: options.ignore });
 }
 
 export default createApp;

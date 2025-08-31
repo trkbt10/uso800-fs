@@ -1,7 +1,7 @@
 /**
  * @file Unit tests for PUT handler (co-located)
  */
-import { handlePutRequest } from "../handlers";
+import { handlePutRequest } from "../../webdav/handlers";
 import { createMemoryAdapter } from "../../persist/memory";
 import type { WebDAVLogger } from "../../logging/webdav-logger";
 import type { WebDavHooks } from "../../webdav/hooks";

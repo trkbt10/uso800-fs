@@ -51,6 +51,7 @@ export function buildIgnoreRegexps(globs?: string[]): RegExp[] {
     "**/.AppleDB",
     "**/.TemporaryItems",
     "**/.apDisk",
+    "**/_dav/**",
   ];
   const all = [...defaults, ...(globs ?? [])];
   return all.map((p) => globToRegExp(p));
@@ -102,4 +103,3 @@ export function createIgnoreFilteringAdapter(base: PersistAdapter, isIgnored: (p
     async copy(from, to) { return base.copy(from, to); },
   };
 }
-

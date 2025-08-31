@@ -3,7 +3,12 @@
  */
 import type { PersistAdapter } from "../../persist/types";
 import type { WebDAVLogger } from "../../logging/webdav-logger";
-import type { DavResponse } from "../../hono-middleware-webdav/handler";
+
+export type DavResponse = {
+  status: number;
+  headers?: Record<string, string>;
+  body?: string | Uint8Array;
+};
 import type { WebDavHooks } from "../../webdav/hooks";
 
 /**
