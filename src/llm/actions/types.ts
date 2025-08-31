@@ -1,22 +1,22 @@
 /**
- * @file Common action type pattern to keep per-action exports consistent.
+ * @file Common action type definitions (no backend coupling).
  */
-import type { FsState } from "../../fakefs/state";
 
 export type ToolSpecFor<Name extends string> = {
   type: "function";
   name: Name;
   strict: true;
+  description?: string;
   parameters: {
     type: "object";
     properties: Record<string, unknown>;
     required?: string[];
     additionalProperties: false;
+    description?: string;
   };
 };
 
 export type ToolAction<A extends { type: string }> = {
   function: ToolSpecFor<A["type"]>;
   normalize: (params: Record<string, unknown>) => A | undefined;
-  apply: (state: FsState, action: A) => string | void | boolean;
 };

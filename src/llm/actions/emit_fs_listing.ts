@@ -1,8 +1,9 @@
 /**
  * @file Action: emit_fs_listing
+ *
+ * Generates a listing for a target folder by declaring directories/files to create.
+ * This is the primary tool for fabricating believable structures.
  */
-import type { FsState } from "../../fakefs/state";
-import { ensureDir, putFile } from "../../fakefs/state";
 import { isStringArray, toEntries } from "./util";
 import type { ToolAction } from "./types";
 
@@ -19,19 +20,46 @@ export const emit_fs_listing: ToolAction<EmitFsListingAction> = {
     type: "function",
     name: "emit_fs_listing",
     strict: true,
+    // What this tool does and when/how to use it.
+    // Emphasize coherence: small, plausible groupings that feel related to the folder.
+    description:
+      "Create a plausible folder listing for the requested path by declaring new directories and files. " +
+      "Favor cohesion (2–5 entries), short names, and playful, believable content.",
     parameters: {
       type: "object",
+      description:
+        "Parameters for fabricating a directory listing. 'entries' should include at least one dir and one file.",
       properties: {
-        folder: { type: "array", items: { type: "string" } },
+        folder: {
+          type: "array",
+          description: "Target path segments from the root. Empty array means root.",
+          items: { type: "string", description: "A single path segment (no slashes).", minLength: 1, pattern: "^[^/]+$" },
+        },
         entries: {
           type: "array",
+          description: "Entries to create under the folder. Include a mix of dirs/files.",
+          minItems: 1,
           items: {
             type: "object",
+            description: "A directory or a file to create in the target folder.",
             properties: {
-              kind: { type: "string", enum: ["dir", "file"] },
-              name: { type: "string" },
-              content: { type: "string" },
-              mime: { type: "string" },
+              kind: { type: "string", enum: ["dir", "file"], description: "Entry type to create." },
+              name: {
+                type: "string",
+                description: "Entry name (no slashes). Keep it short and friendly.",
+                minLength: 1,
+                pattern: "^[^/]+$",
+              },
+              content: {
+                type: "string",
+                description: "If kind=file, the textual content to write. Keep it concise and witty.",
+                minLength: 0,
+              },
+              mime: {
+                type: "string",
+                description: "If kind=file, the MIME type for the content (e.g., text/plain, text/markdown).",
+                pattern: "^[a-zA-Z0-9!#$&^_.+-]+\/[a-zA-Z0-9!#$&^_.+-]+$",
+              },
             },
             required: ["kind", "name", "content", "mime"],
             additionalProperties: false,
@@ -49,16 +77,5 @@ export const emit_fs_listing: ToolAction<EmitFsListingAction> = {
       return undefined;
     }
     return { type: "emit_fs_listing", params: { folder, entries } };
-  },
-  apply: (state: FsState, action: EmitFsListingAction) => {
-    const { folder, entries } = action.params;
-    ensureDir(state, folder);
-    for (const e of entries) {
-      if (e.kind === "dir") {
-        ensureDir(state, [...folder, e.name]);
-      } else {
-        putFile(state, [...folder, e.name], e.content, e.mime);
-      }
-    }
   },
 };

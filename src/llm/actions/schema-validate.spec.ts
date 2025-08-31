@@ -1,7 +1,7 @@
 /**
  * @file Validates tool schemas adhere to OpenAI-compatible subset.
  */
-import { getOpenAIToolsSpec } from "./index";
+import { getOpenAIToolsSpec } from "./tools";
 import { validateAllTools } from "./schema-validate";
 
 describe("LLM tool schema validation", () => {

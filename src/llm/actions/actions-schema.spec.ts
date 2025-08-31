@@ -4,7 +4,7 @@
  * and that required keys are declared as expected.
  */
 // Use global describe/it/expect from test runner
-import { getOpenAIToolsSpec } from "./index";
+import { getOpenAIToolsSpec } from "./tools";
 
 type JsonSchemaObject = {
   type: "object";
@@ -35,12 +35,6 @@ function isJsonSchemaObject(x: unknown): x is JsonSchemaObject {
 
 // Expected required keys per tool (align with normalize implementations)
 const expectedRequired: Record<string, string[]> = {
-  create_dir: ["path"],
-  create_file: ["path", "content", "mime"],
-  write_file: ["path", "content", "mime"],
-  remove_entry: ["path"],
-  move_entry: ["from", "to"],
-  copy_entry: ["from", "to"],
   emit_fs_listing: ["folder", "entries"],
   emit_file_content: ["path", "content", "mime"],
 };

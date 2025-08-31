@@ -1,8 +1,9 @@
 /**
  * @file Action: emit_file_content
+ *
+ * Produces content for a specific file path. Content should match the filetype/mime
+ * and stay brief, cohesive, and playful.
  */
-import type { FsState } from "../../fakefs/state";
-import { putFile } from "../../fakefs/state";
 import { isStringArray } from "./util";
 import type { ToolAction } from "./types";
 
@@ -13,12 +14,29 @@ export const emit_file_content: ToolAction<EmitFileContentAction> = {
     type: "function",
     name: "emit_file_content",
     strict: true,
+    description:
+      "Generate short, cohesive text for the requested file. " +
+      "Respect the filename extension and any MIME hints.",
     parameters: {
       type: "object",
+      description: "Parameters for fabricating a file's textual content.",
       properties: {
-        path: { type: "array", items: { type: "string" } },
-        content: { type: "string" },
-        mime: { type: "string" },
+        path: {
+          type: "array",
+          description: "Target path segments from the root. Last segment is the filename.",
+          minItems: 1,
+          items: { type: "string", description: "A single path segment (no slashes).", minLength: 1, pattern: "^[^/]+$" },
+        },
+        content: {
+          type: "string",
+          description: "The file's textual content. Keep within a few lines when possible.",
+          minLength: 0,
+        },
+        mime: {
+          type: "string",
+          description: "The MIME type for the content (e.g., text/plain, text/markdown).",
+          pattern: "^[a-zA-Z0-9!#$&^_.+-]+\/[a-zA-Z0-9!#$&^_.+-]+$",
+        },
       },
       required: ["path", "content", "mime"],
       additionalProperties: false,
@@ -32,10 +50,5 @@ export const emit_file_content: ToolAction<EmitFileContentAction> = {
       return undefined;
     }
     return { type: "emit_file_content", params: { path, content, mime } };
-  },
-  apply: (state: FsState, action: EmitFileContentAction) => {
-    const { path, content, mime } = action.params;
-    putFile(state, path, content, mime);
-    return content;
   },
 };

@@ -1,84 +1,166 @@
 /**
- * @file Unit: webdav/handler minimal DAV flows without network
+ * @file Tests for WebDAV handlers using PersistAdapter.
  */
-import { createFsState, getEntry } from "../fakefs/state";
-import { handleOptions, handlePropfind, handleMkcol, handleGet, handleHead, handlePut, handleDelete, handleMove, handleCopy } from "./handler";
+import { createMemoryAdapter } from "../persist/memory";
+import {
+  handleOptions,
+  handlePropfind,
+  handleMkcol,
+  handleGet,
+  handleHead,
+  handlePut,
+  handleDelete,
+  handleMove,
+  handleCopy,
+} from "./handler";
 
-describe("webdav/handler", () => {
-  it("OPTIONS returns DAV headers", () => {
-    const res = handleOptions();
-    expect(res.status).toBe(200);
-    expect(res.headers?.DAV).toContain("1");
-    expect(res.headers?.Allow).toContain("PROPFIND");
+describe("WebDAV Handlers with PersistAdapter", () => {
+  describe("handleOptions", () => {
+    it("returns DAV headers", () => {
+      const res = handleOptions();
+      expect(res.status).toBe(200);
+      expect(res.headers).toMatchObject({
+        DAV: "1,2",
+        Allow: expect.stringContaining("OPTIONS"),
+      });
+    });
   });
 
-  it("MKCOL creates directory and generation populates children", () => {
-    const st = createFsState();
-    const r = handleMkcol(st, "/ProjectX");
-    expect(r.status).toBe(201);
-    const dir = getEntry(st, ["ProjectX"]);
-    expect(dir?.type).toBe("dir");
-    const children = dir && dir.type === "dir" ? Array.from(dir.children.keys()) : [];
-    expect(children.length).toBeGreaterThan(0);
+  describe("handlePropfind", () => {
+    it("returns 404 for non-existent path", async () => {
+      const persist = createMemoryAdapter();
+      const res = await handlePropfind(persist, "/nonexistent", null);
+      expect(res.status).toBe(404);
+    });
+
+    it("returns multistatus for root", async () => {
+      const persist = createMemoryAdapter();
+      await persist.ensureDir(["test"]);
+      await persist.writeFile(["file.txt"], new TextEncoder().encode("content"), "text/plain");
+      
+      const res = await handlePropfind(persist, "/", "1");
+      expect(res.status).toBe(207);
+      expect(res.body).toContain("multistatus");
+      
+      const res0 = await handlePropfind(persist, "/", "0");
+      expect(res0.body).toContain("multistatus");
+    });
   });
 
-  it("PROPFIND depth=0 lists self, depth=1 lists children", () => {
-    const st = createFsState();
-    handleMkcol(st, "/Seed");
-    const resp0 = handlePropfind(st, "/Seed", "0");
-    expect(resp0.status).toBe(207);
-    expect(String(resp0.body)).toContain("multistatus");
-    // depth 1
-    const resp1 = handlePropfind(st, "/Seed", "1");
-    expect(String(resp1.body)).toContain("href");
+  describe("handleMkcol", () => {
+    it("creates directory", async () => {
+      const persist = createMemoryAdapter();
+      const res = await handleMkcol(persist, "/newdir");
+      expect(res.status).toBe(201);
+      
+      const exists = await persist.exists(["newdir"]);
+      expect(exists).toBe(true);
+    });
   });
 
-  it("GET on dir returns html index; on file fabricates content", () => {
-    const st = createFsState();
-    handleMkcol(st, "/Alpha");
-    const rDir = handleGet(st, "/Alpha");
-    expect(rDir.status).toBe(200);
-    expect(rDir.headers?.["Content-Type"]).toBe("text/html");
-    // ensure a file path renders content
-    const anyChild = getEntry(st, ["Alpha"]);
-    // eslint-disable-next-line no-restricted-syntax -- Needed for iterating through children to find first file
-    let firstFile = "Alpha_1.txt";
-    if (anyChild && anyChild.type === "dir") {
-      for (const k of anyChild.children.keys()) {
-        const child = getEntry(st, ["Alpha", k]);
-        if (child && child.type === "file") {
-          firstFile = k;
-          break;
-        }
-      }
-    }
-    const rFile = handleGet(st, `/Alpha/${firstFile}`);
-    expect(rFile.status).toBe(200);
-    expect(String(rFile.body)).toContain("fabricated");
+  describe("handleGet", () => {
+    it("returns 404 for missing file", async () => {
+      const persist = createMemoryAdapter();
+      const res = await handleGet(persist, "/missing.txt");
+      expect(res.status).toBe(404);
+    });
+
+    it("returns file content", async () => {
+      const persist = createMemoryAdapter();
+      const content = "Hello World";
+      await persist.writeFile(["test.txt"], new TextEncoder().encode(content), "text/plain");
+      
+      const res = await handleGet(persist, "/test.txt");
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual(new TextEncoder().encode(content));
+    });
+
+    it("returns HTML index for directory", async () => {
+      const persist = createMemoryAdapter();
+      await persist.ensureDir(["dir"]);
+      await persist.writeFile(["dir", "file.txt"], new TextEncoder().encode("content"), "text/plain");
+      
+      const res = await handleGet(persist, "/dir");
+      expect(res.status).toBe(200);
+      expect(res.headers?.["Content-Type"]).toBe("text/html");
+    });
   });
 
-  it("HEAD returns metadata", () => {
-    const st = createFsState();
-    handleMkcol(st, "/Beta");
-    const r = handleHead(st, "/Beta");
-    expect(r.status).toBe(200);
-    expect(r.headers?.["Content-Type"]).toBe("text/html");
+  describe("handleHead", () => {
+    it("returns headers without body", async () => {
+      const persist = createMemoryAdapter();
+      await persist.writeFile(["file.txt"], new TextEncoder().encode("content"), "text/plain");
+      
+      const res = await handleHead(persist, "/file.txt");
+      expect(res.status).toBe(200);
+      expect(res.headers?.["Content-Length"]).toBe("7");
+      expect(res.body).toBeUndefined();
+    });
   });
 
-  it("PUT/DELETE/MOVE/COPY basic flows", () => {
-    const st = createFsState();
-    handleMkcol(st, "/Zeta");
-    // PUT creates a file
-    const rPut = handlePut(st, "/Zeta/note.txt", "hello", "text/plain");
-    expect(rPut.status).toBe(201);
-    // MOVE file
-    const rMove = handleMove(st, "/Zeta/note.txt", "/Zeta/renamed.txt");
-    expect(rMove.status).toBe(201);
-    // COPY file
-    const rCopy = handleCopy(st, "/Zeta/renamed.txt", "/Zeta/copy.txt");
-    expect(rCopy.status).toBe(201);
-    // DELETE file
-    const rDel = handleDelete(st, "/Zeta/copy.txt");
-    expect(rDel.status).toBe(204);
+  describe("handlePut", () => {
+    it("creates file with content", async () => {
+      const persist = createMemoryAdapter();
+      const content = "New content";
+      
+      const res = await handlePut(persist, "/new.txt", content, "text/plain");
+      expect(res.status).toBe(201);
+      
+      const data = await persist.readFile(["new.txt"]);
+      expect(new TextDecoder().decode(data)).toBe(content);
+    });
+  });
+
+  describe("handleDelete", () => {
+    it("deletes existing file", async () => {
+      const persist = createMemoryAdapter();
+      await persist.writeFile(["file.txt"], new TextEncoder().encode("content"), "text/plain");
+      
+      const res = await handleDelete(persist, "/file.txt");
+      expect(res.status).toBe(204);
+      
+      const exists = await persist.exists(["file.txt"]);
+      expect(exists).toBe(false);
+    });
+
+    it("returns 404 for non-existent file", async () => {
+      const persist = createMemoryAdapter();
+      const res = await handleDelete(persist, "/missing.txt");
+      expect(res.status).toBe(404);
+    });
+  });
+
+  describe("handleMove", () => {
+    it("moves file to new location", async () => {
+      const persist = createMemoryAdapter();
+      await persist.writeFile(["old.txt"], new TextEncoder().encode("content"), "text/plain");
+      
+      const res = await handleMove(persist, "/old.txt", "/new.txt");
+      expect(res.status).toBe(201);
+      
+      const oldExists = await persist.exists(["old.txt"]);
+      const newExists = await persist.exists(["new.txt"]);
+      expect(oldExists).toBe(false);
+      expect(newExists).toBe(true);
+    });
+  });
+
+  describe("handleCopy", () => {
+    it("copies file to new location", async () => {
+      const persist = createMemoryAdapter();
+      const content = "content";
+      await persist.writeFile(["source.txt"], new TextEncoder().encode(content), "text/plain");
+      
+      const res = await handleCopy(persist, "/source.txt", "/dest.txt");
+      expect(res.status).toBe(201);
+      
+      const sourceExists = await persist.exists(["source.txt"]);
+      const destExists = await persist.exists(["dest.txt"]);
+      expect(sourceExists).toBe(true);
+      expect(destExists).toBe(true);
+      
+      const destContent = await persist.readFile(["dest.txt"]);
+      expect(new TextDecoder().decode(destContent)).toBe(content);
+    });
   });
 });

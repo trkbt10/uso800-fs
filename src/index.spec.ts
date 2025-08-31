@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { startFromCli } from "./index";
+import { startFromCli } from "./cli";
 
 describe("CLI Entry Point", () => {
   const originalEnv = process.env;

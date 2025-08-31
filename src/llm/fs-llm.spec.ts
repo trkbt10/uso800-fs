@@ -1,89 +1,169 @@
 /**
- * @file Unit: uso800fs LLM orchestrator using Responses API streaming (mocked)
+ * @file Unit tests for LLM orchestrator with PersistAdapter
  */
 import { createUsoFsLLMInstance } from "./fs-llm";
-import { createFsState, getEntry } from "../fakefs/state";
+import { createMemoryAdapter } from "../persist/memory";
+import type { PersistAdapter } from "../persist/types";
 
-function mockStream(events: unknown[]): AsyncIterable<unknown> {
-  async function* gen() {
-    for (const ev of events) {
-      yield ev;
-    }
-  }
-  return gen();
-}
+describe("fs-llm with PersistAdapter", () => {
+  describe("createUsoFsLLMInstance", () => {
+    it("requires client with responses.stream", () => {
+      expect(() =>
+        createUsoFsLLMInstance({} as any, { model: "test", persist: createMemoryAdapter() }),
+      ).toThrow("client.responses.stream is required");
+    });
 
-describe("uso800fs/llm fs-llm", () => {
-  it("fabricateListing applies emit_fs_listing to state", async () => {
-    const st = createFsState();
-    const client = {
-      responses: {
-        stream: () =>
-          mockStream([
-            {
-              type: "response.output_item.added",
-              item: { type: "function_call", id: "i1", name: "emit_fs_listing" },
-              output_index: 0,
-              sequence_number: 1,
-            },
-            {
-              type: "response.function_call.arguments.delta",
-              item_id: "i1",
-              delta:
-                '{"folder":["AI"],"entries":[{"kind":"dir","name":"D"},{"kind":"file","name":"hello.txt","content":"hi","mime":"text/plain"}]}',
-              output_index: 0,
-              sequence_number: 2,
-            },
-            {
-              type: "response.function_call.arguments.done",
-              item_id: "i1",
-              arguments:
-                '{"folder":["AI"],"entries":[{"kind":"dir","name":"D"},{"kind":"file","name":"hello.txt","content":"hi","mime":"text/plain"}]}',
-              output_index: 0,
-              sequence_number: 3,
-            },
-          ]),
-      },
-    };
-    const llm = createUsoFsLLMInstance(client, { model: "m", state: st });
-    await llm.fabricateListing(["AI"]);
-    const file = getEntry(st, ["AI", "hello.txt"]);
-    expect(file?.type).toBe("file");
+    it("requires model and persist", () => {
+      const mockClient = {
+        responses: { stream: () => {} },
+      };
+      expect(() => createUsoFsLLMInstance(mockClient as any, {} as any)).toThrow("model and persist are required");
+    });
+
+    it("creates instance with valid inputs", () => {
+      const mockClient = {
+        responses: { 
+          stream: async () => {
+            return (async function* () {
+              yield {
+                type: "response.function_call_arguments.done",
+                item_id: "test",
+                arguments: JSON.stringify({
+                  path: "/test",
+                  entries: [
+                    { name: "file.txt", type: "file", content: "test" }
+                  ]
+                })
+              };
+            })();
+          }
+        },
+      };
+      const persist = createMemoryAdapter();
+      const instance = createUsoFsLLMInstance(mockClient as any, { 
+        model: "test", 
+        persist 
+      });
+      
+      expect(instance).toHaveProperty("fabricateListing");
+      expect(instance).toHaveProperty("fabricateFileContent");
+    });
   });
 
-  it("fabricateFileContent returns content and writes file", async () => {
-    const st = createFsState();
-    const client = {
-      responses: {
-        stream: () =>
-          mockStream([
-            {
-              type: "response.output_item.added",
-              item: { type: "function_call", id: "i1", name: "emit_file_content" },
-              output_index: 0,
-              sequence_number: 1,
-            },
-            {
-              type: "response.function_call.arguments.delta",
-              item_id: "i1",
-              delta: '{"path":["Docs","note.md"],"content":"Hello Files","mime":"text/markdown"}',
-              output_index: 0,
-              sequence_number: 2,
-            },
-            {
-              type: "response.function_call.arguments.done",
-              item_id: "i1",
-              arguments: '{"path":["Docs","note.md"],"content":"Hello Files","mime":"text/markdown"}',
-              output_index: 0,
-              sequence_number: 3,
-            },
-          ]),
-      },
-    };
-    const llm = createUsoFsLLMInstance(client, { model: "m", state: st });
-    const text = await llm.fabricateFileContent(["Docs", "note.md"]);
-    expect(text).toContain("Hello Files");
-    const file = getEntry(st, ["Docs", "note.md"]);
-    expect(file?.type).toBe("file");
+  describe("fabricateListing", () => {
+    it("creates directories and files via PersistAdapter", async () => {
+      const persist = createMemoryAdapter();
+      const mockStream = (async function* () {
+        yield {
+          type: "response.output_item.added",
+          item: { type: "function_call", id: "test", name: "emit_fs_listing" }
+        };
+        yield {
+          type: "response.function_call_arguments.delta",
+          item_id: "test",
+          delta: JSON.stringify({
+            path: "/test",
+            entries: [
+              { name: "dir1", type: "dir" },
+              { name: "file.txt", type: "file", content: "content" }
+            ]
+          })
+        };
+        yield {
+          type: "response.function_call_arguments.done",
+          item_id: "test",
+          arguments: JSON.stringify({
+            path: "/test",
+            entries: [
+              { name: "dir1", type: "dir" },
+              { name: "file.txt", type: "file", content: "content" }
+            ]
+          })
+        };
+      })();
+
+      const mockClient = {
+        responses: { stream: async () => mockStream },
+      };
+
+      const instance = createUsoFsLLMInstance(mockClient as any, { 
+        model: "test", 
+        persist 
+      });
+      
+      await instance.fabricateListing(["test"]);
+      
+      // Verify created entries
+      expect(await persist.exists(["test", "dir1"])).toBe(true);
+      expect(await persist.exists(["test", "file.txt"])).toBe(true);
+      
+      const content = await persist.readFile(["test", "file.txt"]);
+      expect(new TextDecoder().decode(content)).toBe("content");
+    });
+  });
+
+  describe("fabricateFileContent", () => {
+    it("creates file with content via PersistAdapter", async () => {
+      const persist = createMemoryAdapter();
+      const mockStream = (async function* () {
+        yield {
+          type: "response.output_item.added",
+          item: { type: "function_call", id: "test", name: "emit_file_content" }
+        };
+        yield {
+          type: "response.function_call_arguments.delta",
+          item_id: "test",
+          delta: JSON.stringify({
+            path: "/test.txt",
+            content: "Generated content"
+          })
+        };
+        yield {
+          type: "response.function_call_arguments.done",
+          item_id: "test",
+          arguments: JSON.stringify({
+            path: "/test.txt",
+            content: "Generated content"
+          })
+        };
+      })();
+
+      const mockClient = {
+        responses: { stream: async () => mockStream },
+      };
+
+      const instance = createUsoFsLLMInstance(mockClient as any, { 
+        model: "test", 
+        persist 
+      });
+      
+      const result = await instance.fabricateFileContent(["test.txt"]);
+      
+      expect(result).toBe("Generated content");
+      expect(await persist.exists(["test.txt"])).toBe(true);
+      
+      const content = await persist.readFile(["test.txt"]);
+      expect(new TextDecoder().decode(content)).toBe("Generated content");
+    });
+
+    it("returns empty string when no content generated", async () => {
+      const persist = createMemoryAdapter();
+      const mockStream = (async function* () {
+        // Empty stream
+      })();
+
+      const mockClient = {
+        responses: { stream: async () => mockStream },
+      };
+
+      const instance = createUsoFsLLMInstance(mockClient as any, { 
+        model: "test", 
+        persist 
+      });
+      
+      const result = await instance.fabricateFileContent(["test.txt"]);
+      
+      expect(result).toBe("");
+    });
   });
 });

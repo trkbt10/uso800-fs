@@ -1,142 +1,48 @@
 #!/usr/bin/env bun
 /**
- * @file Hono-based WebDAV app factory. LLM/Persist は index.ts から注入する（no-magic）。
+ * @file Hono-based WebDAV app factory using PersistAdapter directly.
  */
 import { Hono, type Context } from "hono";
-import { type FsState, getEntry, ensureDir, putFile } from "./fakefs/state";
 import {
   handleOptions,
   handlePropfind,
   handleMkcol,
   handleGet,
   handleHead,
+  handlePut,
+  handleDelete,
+  handleMove,
+  handleCopy,
   type DavResponse,
 } from "./hono-middleware-webdav/handler";
 import type { PersistAdapter } from "./persist/types";
+import { createWebDAVLogger, type WebDAVLogger } from "./logging/webdav-logger";
+import { RequestContextFactory } from "./persist/request-context";
 
-// per-app dependency types
+// LLM interface for generating content
 export type LlmLike = {
-  fabricateListing: (path: string[]) => Promise<void>;
-  fabricateFileContent: (path: string[]) => Promise<string>;
+  fabricateListing: (path: string[], opts?: { depth?: string | null }) => Promise<void>;
+  fabricateFileContent: (path: string[], opts?: { mimeHint?: string }) => Promise<string>;
 };
-export type LlmFactory = (a: { state: FsState }) => LlmLike;
 
 /**
- * Creates a WebDAV Hono app bound to the given in-memory FsState.
- * statePath is used to persist JSON snapshots after mutations.
+ * Creates a WebDAV Hono app using PersistAdapter directly.
  */
 export function makeWebdavApp(opts: {
-  state: FsState;
-  statePath?: string;
-  deps: { persist?: PersistAdapter; llm?: LlmLike };
+  persist: PersistAdapter;
+  llm?: LlmLike;
+  logger?: WebDAVLogger;
 }) {
-  const state = opts.state;
-  // statePath is currently unused because persistence is handled via PersistAdapter
-  const persist = opts.deps.persist;
-  const currentLlm = opts.deps.llm;
+  const basePersist = opts.persist;
+  const persistFactory = new RequestContextFactory(basePersist);
+  const llm = opts.llm;
+  const logger = opts.logger ?? createWebDAVLogger();
   const app = new Hono();
-  const hasLLM = () => typeof currentLlm !== "undefined";
-
-  async function syncFolderToPersist(parts: string[]) {
-    if (!persist) {
-      return;
-    }
-    await persist.ensureDir(parts);
-    const dir = getEntry(state, parts);
-    if (!dir || dir.type !== "dir") {
-      return;
-    }
-    for (const [name, child] of dir.children.entries()) {
-      const next = [...parts, name];
-      if (child.type === "dir") {
-        await persist.ensureDir(next);
-        await syncFolderToPersist(next);
-      } else {
-        const data = new TextEncoder().encode(child.content ?? "");
-        await persist.writeFile(next, data, child.mime);
-      }
-    }
-  }
-
-  async function syncFileToPersist(parts: string[]) {
-    if (!persist) {
-      return;
-    }
-    const e = getEntry(state, parts);
-    if (!e || e.type !== "file") {
-      return;
-    }
-    const data = new TextEncoder().encode(e.content ?? "");
-    await persist.ensureDir(parts.slice(0, -1));
-    await persist.writeFile(parts, data, e.mime);
-  }
-
-  /**
-   * Attempts to populate state from persistence for a folder path.
-   */
-  async function loadFolderFromPersist(parts: string[]) {
-    if (!persist) {
-      return;
-    }
-    const exists = await persist.exists(parts);
-    if (!exists) {
-      return;
-    }
-    ensureDir(state, parts);
-    const names = await persist.readdir(parts);
-    for (const name of names) {
-      const childPath = [...parts, name];
-      const st = await persist.stat(childPath);
-      if (st.type === "dir") {
-        ensureDir(state, childPath);
-        await loadFolderFromPersist(childPath);
-      } else {
-        const data = await persist.readFile(childPath);
-        const content = new TextDecoder().decode(data);
-        putFile(state, childPath, content);
-      }
-    }
-  }
-
-  /**
-   * Attempts to populate state from persistence for a file path.
-   */
-  async function loadFileFromPersist(parts: string[]) {
-    if (!persist) {
-      return false;
-    }
-    const exists = await persist.exists(parts);
-    if (!exists) {
-      return false;
-    }
-    const data = await persist.readFile(parts);
-    const content = new TextDecoder().decode(data);
-    ensureDir(state, parts.slice(0, -1));
-    putFile(state, parts, content);
-    return true;
-  }
 
   /**
    * Sends a DavResponse through Hono's Context with proper headers.
    */
-  function logWeb(stage: "request" | "response", c: Context, extra?: Record<string, unknown>) {
-    const payload: Record<string, unknown> = {
-      type: "webdav",
-      stage,
-      ts: new Date().toISOString(),
-      method: c.req.method,
-      path: c.req.path,
-    };
-    if (extra && typeof extra === "object") {
-      for (const [k, v] of Object.entries(extra)) {
-        payload[k] = v;
-      }
-    }
-    console.log("[uso800fs][webdav] " + JSON.stringify(payload));
-  }
-
-  function send(c: Context, res: DavResponse, info?: Record<string, unknown>) {
-    logWeb("response", c, { status: res.status, ...info });
+  function send(c: Context, res: DavResponse) {
     const init: ResponseInit = { status: res.status, headers: res.headers };
     const body = (res.body ?? "") as BodyInit;
     return new Response(body, init);
@@ -146,98 +52,190 @@ export function makeWebdavApp(opts: {
     // Basic CORS and DAV headers
     c.header("DAV", "1,2");
     c.header("MS-Author-Via", "DAV");
-    c.header("Allow", "OPTIONS, PROPFIND, MKCOL, GET, HEAD");
-    const depth = c.req.header("Depth");
-    if (typeof depth === "string") {
-      logWeb("request", c, { depth });
-    } else {
-      logWeb("request", c);
-    }
+    c.header("Allow", "OPTIONS, PROPFIND, MKCOL, GET, HEAD, PUT, DELETE, MOVE, COPY");
     await next();
   });
 
   app.options("/*", (c) => {
-    const res = handleOptions();
+    if (logger) {
+      logger.logInput("OPTIONS", c.req.path);
+    }
+    const res = handleOptions(logger);
     return send(c, res);
   });
 
   app.get("/*", async (c) => {
     const p = c.req.path;
-    const initial = handleGet(state, p);
-    if (initial.status !== 404) {
-      return send(c, initial, { source: "state" });
+    if (logger) {
+      logger.logInput("GET", p);
     }
+    
+    // Create request-scoped persist context
+    const persist = persistFactory.createContext();
     const parts = p.split("/").filter((s) => s);
-    if (await loadFileFromPersist(parts)) {
-      return send(c, handleGet(state, p), { source: "persist" });
+    
+    // Check if file exists
+    const exists = await persist.exists(parts);
+    if (exists) {
+      const res = await handleGet(persist, p, logger);
+      return send(c, res);
     }
-    if (!hasLLM()) {
-      return send(c, initial, { source: "none" });
+    
+    // If not exists and we have LLM, try to generate content
+    if (llm) {
+      try {
+        const content = await llm.fabricateFileContent(parts);
+        if (content) {
+          // Ensure parent directory exists
+          if (parts.length > 1) {
+            await persist.ensureDir(parts.slice(0, -1));
+          }
+          // Write the generated content
+          await persist.writeFile(parts, new TextEncoder().encode(content), "text/plain");
+          // Now serve it
+          const res = await handleGet(persist, p, logger);
+          return send(c, res);
+        }
+      } catch {
+        // Fall through to 404
+      }
     }
-    const llm = currentLlm;
-    if (!llm) {
-      return send(c, initial, { source: "none" });
+    
+    // Return 404
+    if (logger) {
+      logger.logOutput("GET", p, 404);
     }
-    const text = await llm.fabricateFileContent(parts);
-    if (text && typeof text === "string") {
-      const mime = "text/plain";
-      ensureDir(state, parts.slice(0, -1));
-      putFile(state, parts, text, mime);
-      await syncFileToPersist(parts);
-      return send(c, handleGet(state, p), { source: "llm" });
-    }
-    return send(c, initial, { source: "none" });
+    return send(c, { status: 404 });
   });
 
-  app.on("HEAD", "/*", (c) => {
+  app.on("HEAD", "/*", async (c) => {
     const p = c.req.path;
-    const res = handleHead(state, p);
-    return send(c, res, { source: "state" });
+    if (logger) {
+      logger.logInput("HEAD", p);
+    }
+    const persist = persistFactory.createContext();
+    const res = await handleHead(persist, p, logger);
+    return send(c, res);
+  });
+
+  app.on("PUT", "/*", async (c) => {
+    const p = c.req.path;
+    if (logger) {
+      logger.logInput("PUT", p);
+    }
+    const persist = persistFactory.createContext();
+    const body = await c.req.arrayBuffer();
+    const contentType = c.req.header("Content-Type");
+    const res = await handlePut(persist, p, new Uint8Array(body), contentType, logger);
+    return send(c, res);
+  });
+
+  app.on("DELETE", "/*", async (c) => {
+    const p = c.req.path;
+    if (logger) {
+      logger.logInput("DELETE", p);
+    }
+    const persist = persistFactory.createContext();
+    const res = await handleDelete(persist, p, logger);
+    return send(c, res);
   });
 
   // WebDAV-specific methods via c.req.method
   app.use("/*", async (c, next) => {
     const method = c.req.method.toUpperCase();
     const p = c.req.path;
+    
     if (method === "PROPFIND") {
       const depth = c.req.header("Depth") ?? null;
-      const initial = handlePropfind(state, p, depth);
-      if (initial.status !== 404) {
-        return send(c, initial, { source: "state" });
+      if (logger) {
+        logger.logInput("PROPFIND", p, { depth });
       }
+      
+      const persist = persistFactory.createContext();
       const parts = p.split("/").filter((s) => s);
-      await loadFolderFromPersist(parts);
-      const afterPersist = handlePropfind(state, p, depth);
-      if (afterPersist.status !== 404) {
-        return send(c, afterPersist, { source: "persist" });
+      
+      // Check if exists
+      const exists = await persist.exists(parts);
+      if (exists) {
+        const res = await handlePropfind(persist, p, depth, logger);
+        return send(c, res);
       }
-      if (!hasLLM()) {
-        return send(c, initial, { source: "none" });
-      }
-      const llm = currentLlm;
-      if (!llm) {
-        return send(c, initial, { source: "none" });
-      }
-      await llm.fabricateListing(parts);
-      await syncFolderToPersist(parts);
-      return send(c, handlePropfind(state, p, depth), { source: "llm" });
-    }
-    if (method === "MKCOL") {
-      const parts = p.split("/").filter((s) => s);
-      const res = handleMkcol(state, p);
-      // Prefer LLM-driven listing if available
-      if (hasLLM()) {
-        const llm = currentLlm;
-        if (llm) {
-          await llm.fabricateListing(parts);
+      
+      // If not exists and we have LLM, generate listing
+      if (llm) {
+        try {
+          await llm.fabricateListing(parts, { depth });
+          const res = await handlePropfind(persist, p, depth, logger);
+          return send(c, res);
+        } catch {
+          // Fall through to 404
         }
-        await syncFolderToPersist(parts);
-        return send(c, res, { llmUsed: true });
       }
-      await syncFolderToPersist(parts);
-      return send(c, res, { llmUsed: false });
+      
+      // Return 404
+      if (logger) {
+        logger.logOutput("PROPFIND", p, 404);
+      }
+      return send(c, { status: 404 });
     }
+    
+    if (method === "MKCOL") {
+      if (logger) {
+        logger.logInput("MKCOL", p);
+      }
+      
+      const persist = persistFactory.createContext();
+      const parts = p.split("/").filter((s) => s);
+      
+      // Create directory
+      const res = await handleMkcol(persist, p, { 
+        logger,
+        onGenerate: llm ? async (folder) => {
+          try {
+            await llm.fabricateListing(folder);
+          } catch {
+            // Ignore errors
+          }
+        } : undefined
+      });
+      
+      return send(c, res);
+    }
+    
+    if (method === "MOVE") {
+      const destination = c.req.header("Destination");
+      if (!destination) {
+        return send(c, { status: 400 });
+      }
+      
+      if (logger) {
+        logger.logInput("MOVE", p, { destination });
+      }
+      
+      const persist = persistFactory.createContext();
+      const destUrl = new URL(destination);
+      const res = await handleMove(persist, p, destUrl.pathname, logger);
+      return send(c, res);
+    }
+    
+    if (method === "COPY") {
+      const destination = c.req.header("Destination");
+      if (!destination) {
+        return send(c, { status: 400 });
+      }
+      
+      if (logger) {
+        logger.logInput("COPY", p, { destination });
+      }
+      
+      const persist = persistFactory.createContext();
+      const destUrl = new URL(destination);
+      const res = await handleCopy(persist, p, destUrl.pathname, logger);
+      return send(c, res);
+    }
+    
     await next();
   });
+  
   return app;
 }

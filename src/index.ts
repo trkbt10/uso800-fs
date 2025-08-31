@@ -1,129 +1,115 @@
 /**
- * @file Library entry. 起動オプションの処理と依存注入を行う。
- * 環境変数はこのファイルからのみ参照する（no-magic）。
+ * @file Library entry point using PersistAdapter directly (no fakefs).
  */
 import OpenAI from "openai";
-import { createUsoFsLLMInstance } from "./llm/fs-llm";
+import { createMemoryAdapter } from "./persist/memory";
 import { createNodeFsAdapter } from "./persist/node-fs";
-import { createLockedPersistAdapter } from "./persist/lock";
+import { createDataLoaderAdapter } from "./persist/dataloader-adapter";
 import type { PersistAdapter } from "./persist/types";
-import { makeWebdavApp, type LlmFactory } from "./server";
-import { readFileSync, existsSync } from "node:fs";
-import { createFsState, fromPlain, type FsState } from "./fakefs/state";
-// no direct snapshot writing here; server handles save on mutations
-
-function parseCli(argv: string[]) {
-  const out: { port?: number; state?: string; model?: string; instruction?: string; persistRoot?: string } = {};
-  for (let i = 0; i < argv.length; i += 1) {
-    const a = argv[i];
-    if (a === "--port") {
-      out.port = Number(argv[i + 1]);
-      i += 1;
-      continue;
-    }
-    if (a === "--state") {
-      out.state = argv[i + 1];
-      i += 1;
-      continue;
-    }
-    if (a === "--model") {
-      out.model = argv[i + 1];
-      i += 1;
-      continue;
-    }
-    if (a === "--instruction") {
-      out.instruction = argv[i + 1];
-      i += 1;
-      continue;
-    }
-    if (a === "--persist-root") {
-      out.persistRoot = argv[i + 1];
-      i += 1;
-      continue;
-    }
-  }
-  return out;
-}
+import { makeWebdavApp, type LlmLike } from "./server";
+import { createWebDAVLogger } from "./logging/webdav-logger";
+import { createUsoFsLLMInstance } from "./llm/fs-llm";
 
 /**
- * Builds a playful instruction prompt to encourage silly outputs.
+ * App initialization options.
+ */
+export type AppInitOptions = {
+  apiKey?: string;
+  model?: string;
+  instruction?: string;
+  persistRoot?: string;
+  state?: string; // For backwards compatibility (ignored)
+  memoryOnly?: boolean;
+};
+
+/**
+ * Builds a playful instruction prompt.
  */
 function buildAbsurdInstruction(extra?: string): string {
-  const base = [
-    "You are USO800 Gremlin, a chaotic filesystem fabricator.",
-    "Goal: produce ludicrous directory listings and file contents for a fake FS.",
-    "- Only use tools (no plain text): emit_fs_listing, emit_file_content",
-    "- Prefer bizarre names (e.g., '🤡-noises', '000-SILLY', 'wow_such_dir')",
-    "- File content: playful nonsense, ASCII art, mock changelogs, haiku, fake TODOs",
-    "- Be safe and non-offensive; avoid real identities or secrets",
-    "- Keep outputs small and cohesive for fast demos",
-  ].join("\n");
-  return extra ? `${base}\n\nEXTRA:\n${extra}` : base;
+  const instr = [
+    "Generate absurd and whimsical directories and files when navigating in a WebDAV client.",
+    "Every file and folder name should exist, be unique, and be filled with random mysterious content.",
+    "All files should contain fully formed, though nonsensical, content.",
+    extra,
+  ]
+    .filter(Boolean)
+    .join(" ");
+  return instr;
 }
 
 /**
- * Parses CLI/env, injects dependencies, and returns the Hono app.
+ * Creates the appropriate PersistAdapter based on options.
  */
-export function startFromCli() {
-  const args = parseCli(process.argv.slice(2));
-  const apiKey = process.env.OPENAI_API_KEY;
-  const model = args.model ?? process.env.OPENAI_MODEL;
-  const instruction = buildAbsurdInstruction(args.instruction);
-
-  const persist: PersistAdapter | undefined = args.persistRoot ? createLockedPersistAdapter(createNodeFsAdapter(args.persistRoot)) : undefined;
-  if (persist && args.persistRoot) {
-    console.log("[uso800fs] Persistence root:", args.persistRoot);
-  } else if (args.state) {
-    // Clarify that --state is only used to seed initial in-memory state
-    console.warn("[uso800fs] Warning: --state provided without --persist-root; changes will NOT be saved to", args.state);
-    console.warn("[uso800fs]          Use --persist-root to enable write-through persistence.");
+function createPersistAdapter(options: AppInitOptions): PersistAdapter {
+  if (options.memoryOnly || !options.persistRoot) {
+    // Use in-memory adapter
+    console.log("[uso800fs] Using in-memory storage (no persistence)");
+    return createMemoryAdapter();
   }
-
-  const llmFactory: LlmFactory | undefined = (() => {
-    if (!apiKey || !model) {
-      return undefined;
-    }
-    const client = new OpenAI({ apiKey });
-    const hasResponsesStream = (x: unknown): x is { responses: { stream: (opts: unknown) => unknown } } => {
-      if (typeof x !== "object" || x === null) {
-        return false;
-      }
-      const rec = x as Record<string, unknown>;
-      if (!("responses" in rec)) {
-        return false;
-      }
-      const r = rec.responses as Record<string, unknown> | undefined;
-      return typeof r?.stream === "function";
-    };
-    if (!hasResponsesStream(client)) {
-      return undefined;
-    }
-    console.log("[uso800fs] LLM enabled with model:", model);
-    return ({ state }) => createUsoFsLLMInstance(client, { model, instruction, state });
-  })();
-
-  // Load initial state JSON if provided
-  const state: FsState = (() => {
-    if (args.state && existsSync(args.state)) {
-      const raw = JSON.parse(readFileSync(args.state, "utf8"));
-      const root = fromPlain(raw);
-      if (root.type !== "dir") {
-        throw new Error("Invalid state file: root must be a directory");
-      }
-      return { root };
-    }
-    return createFsState();
-  })();
-
-  // Build Hono app
-  const llm = llmFactory ? llmFactory({ state }) : undefined;
-  const app = makeWebdavApp({ state, statePath: args.state, deps: { persist, llm } });
-  if (args.port) {
-    console.log(`[uso800fs] WebDAV server listening on 127.0.0.1:${args.port}`);
-  }
-  const serverObj: object = { ...app, port: args.port ?? 8787 };
-  return serverObj;
+  
+  // Use file system adapter with DataLoader
+  console.log("[uso800fs] Persistence root:", options.persistRoot);
+  const nodeFs = createNodeFsAdapter(options.persistRoot);
+  return createDataLoaderAdapter(nodeFs);
 }
 
-// Auto-start when executed directly (bun run src/index.ts ...)
-export default startFromCli();
+/**
+ * Creates LLM instance if API key and model are provided.
+ */
+function createLlm(options: AppInitOptions, persist: PersistAdapter): LlmLike | undefined {
+  const apiKey = options.apiKey ?? process.env.OPENAI_API_KEY;
+  const model = options.model ?? process.env.OPENAI_MODEL;
+  const instruction = buildAbsurdInstruction(options.instruction);
+  
+  if (!apiKey || !model) {
+    console.log("[uso800fs] LLM disabled (no API key or model)");
+    return undefined;
+  }
+  
+  const client = new OpenAI({ apiKey });
+  
+  // Check if client has responses API
+  const hasResponsesStream = (x: unknown): x is { responses: { stream: (opts: unknown) => unknown } } => {
+    if (typeof x !== "object" || x === null) {
+      return false;
+    }
+    const rec = x as Record<string, unknown>;
+    if (!("responses" in rec)) {
+      return false;
+    }
+    const r = rec.responses as Record<string, unknown> | undefined;
+    return typeof r?.stream === "function";
+  };
+  
+  if (!hasResponsesStream(client)) {
+    console.log("[uso800fs] LLM disabled (no responses API)");
+    return undefined;
+  }
+  
+  console.log("[uso800fs] LLM enabled with model:", model);
+  
+  return createUsoFsLLMInstance(client, { 
+    model, 
+    instruction, 
+    persist 
+  });
+}
+
+/**
+ * Build Hono app using PersistAdapter directly.
+ */
+export function createApp(options: AppInitOptions = {}) {
+  // Show warning if old state option is used
+  if (options.state && !options.persistRoot) {
+    console.warn("[uso800fs] Warning: --state option is deprecated. Use --persist-root instead.");
+    console.warn("[uso800fs]          State files are no longer used; data is managed by PersistAdapter.");
+  }
+  
+  const persist = createPersistAdapter(options);
+  const llm = createLlm(options, persist);
+  const logger = createWebDAVLogger();
+  
+  return makeWebdavApp({ persist, llm, logger });
+}
+
+export default createApp;

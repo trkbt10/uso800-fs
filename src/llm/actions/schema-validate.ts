@@ -1,7 +1,7 @@
 /**
  * @file Validate tool parameter JSON Schemas against OpenAI-compatible subset.
  */
-import type { ToolSpec } from "./index";
+import type { ToolSpec } from "./tools";
 
 export type ValidationIssue = {
   tool: string;
