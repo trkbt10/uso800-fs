@@ -1,10 +1,11 @@
 /**
  * @file Unit tests for MKCOL handler (co-located)
  */
-import { handleMkcolRequest, createMkcolOnGenerate } from "../handlers";
+import { handleMkcolRequest } from "../handlers";
 import { createMemoryAdapter } from "../../persist/memory";
 import type { WebDAVLogger } from "../../logging/webdav-logger";
-import type { LlmLike } from "../handlers";
+import type { WebDavHooks } from "../../webdav/hooks";
+import { createLlmWebDavHooks, type LlmOrchestrator } from "../../llm/webdav-hooks";
 
 function createLogger(): WebDAVLogger {
   const noop = () => {};
@@ -31,13 +32,15 @@ describe("MKCOL handler", () => {
     expect(await persist.exists(["new-folder"])).toBe(true);
   });
 
-  it("calls on-generate callback", async () => {
+  it("runs afterMkcol hook", async () => {
     const persist = createMemoryAdapter();
     const logger = createLogger();
-    const state = { called: 0 as number };
-    const onGenerate = (path: string[]) => { state.called = state.called + (path.length > 0 ? 1 : 0); };
-    await handleMkcolRequest("/with-callback", { persist, logger, onGenerate });
-    expect(state.called).toBe(1);
+    let called = 0;
+    const hooks: WebDavHooks = {
+      async afterMkcol() { called += 1; }
+    };
+    await handleMkcolRequest("/with-callback", { persist, logger, hooks });
+    expect(called).toBe(1);
   });
 
   it("returns 409 when parent missing", async () => {
@@ -48,28 +51,23 @@ describe("MKCOL handler", () => {
   });
 });
 
-describe("createMkcolOnGenerate", () => {
-  it("returns undefined without LLM", () => {
-    const cb = createMkcolOnGenerate(undefined);
-    expect(cb).toBeUndefined();
-  });
-
-  it("creates callback that uses LLM and swallows errors", async () => {
+describe("createLlmWebDavHooks", () => {
+  it("afterMkcol uses LLM fabricateListing and swallows errors", async () => {
     const persist = createMemoryAdapter();
-    const llm: LlmLike = {
-      async fabricateListing(path: string[]) { await persist.ensureDir(path); },
+    const llmOk: LlmOrchestrator = {
+      async fabricateListing(path) { await persist.ensureDir(path); },
       async fabricateFileContent() { return ""; },
     };
-    const cb = createMkcolOnGenerate(llm)!;
-    await cb(["folder"]);
+    const hooksOk = createLlmWebDavHooks(llmOk);
+    await hooksOk.afterMkcol?.({ urlPath: "/folder", segments: ["folder"], persist, logger: createLogger() }, { status: 201 });
     expect(await persist.exists(["folder"])).toBe(true);
 
-    const failing: LlmLike = {
+    const llmFail: LlmOrchestrator = {
       async fabricateListing() { throw new Error("fail"); },
       async fabricateFileContent() { return ""; },
     };
-    const cb2 = createMkcolOnGenerate(failing)!;
-    await cb2(["x"]); // should not throw
+    const hooksFail = createLlmWebDavHooks(llmFail);
+    await hooksFail.afterMkcol?.({ urlPath: "/x", segments: ["x"], persist, logger: createLogger() }, { status: 201 });
+    // should not throw
   });
 });
-

@@ -6,26 +6,14 @@ import {
   handleGet as webdavGet,
 } from "../../hono-middleware-webdav/handler";
 import type { HandlerOptions, HandlerResult } from "./types";
+import type { WebDavHooks } from "../../webdav/hooks";
 
-async function maybeGenerateEmptyFile(
-  segments: string[],
-  opts: HandlerOptions
-): Promise<boolean> {
-  if (!opts.llm) {
-    return false;
-  }
+async function runBeforeGetHook(hooks: WebDavHooks | undefined, ctx: { urlPath: string; segments: string[]; persist: HandlerOptions["persist"]; logger?: HandlerOptions["logger"] }) {
+  if (!hooks?.beforeGet) { return undefined; }
   try {
-    const content = await opts.llm.fabricateFileContent(segments);
-    if (!content) {
-      return false;
-    }
-    if (segments.length > 1) {
-      await opts.persist.ensureDir(segments.slice(0, -1));
-    }
-    await opts.persist.writeFile(segments, new TextEncoder().encode(content), "text/plain");
-    return true;
+    return await hooks.beforeGet({ urlPath: ctx.urlPath, segments: ctx.segments, persist: ctx.persist, logger: ctx.logger });
   } catch {
-    return false;
+    return undefined;
   }
 }
 
@@ -33,23 +21,26 @@ async function maybeGenerateEmptyFile(
  * Handle GET with optional LLM generation for missing/empty files.
  */
 export async function handleGetRequest(urlPath: string, options: HandlerOptions): Promise<HandlerResult> {
-  const { persist, logger } = options;
+  const { persist, logger, hooks } = options;
   const segments = pathToSegments(urlPath);
 
   logger?.logInput("GET", urlPath);
 
-  // If exists, serve it; if it's an empty file and LLM is available, generate once then serve
+  // If exists, serve it; if it's an empty file and hooks are available, let hook intervene then serve
   const exists = await persist.exists(segments);
   if (exists) {
     try {
       const stat = await persist.stat(segments);
-      if (stat.type === "file" && (stat.size ?? 0) === 0) {
-        const generated = await maybeGenerateEmptyFile(segments, options);
-        const response = await webdavGet(persist, urlPath, logger);
-        if (generated) {
-          return { response, sideEffects: { generated: true, llmCalled: true } };
+      if (stat.type === "file") {
+        const isEmpty = (stat.size ?? 0) === 0;
+        if (isEmpty) {
+          const maybe = await runBeforeGetHook(hooks, { urlPath, segments, persist, logger });
+          const response = await webdavGet(persist, urlPath, logger);
+          if (maybe) {
+            return { response: maybe };
+          }
+          return { response };
         }
-        return { response };
       }
     } catch {
       // Fall through and let webdavGet decide
@@ -58,11 +49,15 @@ export async function handleGetRequest(urlPath: string, options: HandlerOptions)
     return { response };
   }
 
-  // Not exists: optionally generate with LLM then serve, else 404
-  const generated = await maybeGenerateEmptyFile(segments, options);
-  if (generated) {
-    const response = await webdavGet(persist, urlPath, logger);
-    return { response, sideEffects: { generated: true, llmCalled: true } };
+  // Not exists: let hook intervene, then serve or 404
+  const maybe = await runBeforeGetHook(hooks, { urlPath, segments, persist, logger });
+  if (maybe) {
+    return { response: maybe };
+  }
+  // If hook created the file, webdavGet will return it; otherwise 404
+  const response = await webdavGet(persist, urlPath, logger);
+  if (response.status !== 404) {
+    return { response };
   }
 
   logger?.logRead(urlPath, 404);

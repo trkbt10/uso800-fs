@@ -4,7 +4,8 @@
 import { handlePropfindRequest } from "../handlers";
 import { createMemoryAdapter } from "../../persist/memory";
 import type { WebDAVLogger } from "../../logging/webdav-logger";
-import type { LlmLike } from "../handlers";
+import type { WebDavHooks } from "../../webdav/hooks";
+import { createLlmWebDavHooks, type LlmOrchestrator } from "../../llm/webdav-hooks";
 
 function createLogger(): WebDAVLogger {
   const noop = () => {};
@@ -22,11 +23,10 @@ function createLogger(): WebDAVLogger {
   };
 }
 
-function createLlm(persist: ReturnType<typeof createMemoryAdapter>): LlmLike {
-  return {
+function createHooks(persist: ReturnType<typeof createMemoryAdapter>): WebDavHooks {
+  const llm: LlmOrchestrator = {
     async fabricateListing(path) {
       await persist.ensureDir(path);
-      // create some demo content
       if (path.length > 0) {
         const dir = [...path];
         await persist.writeFile([...dir, "file.txt"], new TextEncoder().encode("content"), "text/plain");
@@ -34,21 +34,22 @@ function createLlm(persist: ReturnType<typeof createMemoryAdapter>): LlmLike {
     },
     async fabricateFileContent() { return "Generated content"; },
   };
+  return createLlmWebDavHooks(llm);
 }
 
 describe("PROPFIND handler", () => {
-  it("returns 404 for non-existent directory without LLM", async () => {
+  it("returns 404 for non-existent directory without hooks", async () => {
     const persist = createMemoryAdapter();
     const logger = createLogger();
     const result = await handlePropfindRequest("/missing", "1", { persist, logger });
     expect(result.response.status).toBe(404);
   });
 
-  it("generates listing for non-existent directory with LLM", async () => {
+  it("generates listing for non-existent directory with hooks", async () => {
     const persist = createMemoryAdapter();
     const logger = createLogger();
-    const llm = createLlm(persist);
-    const result = await handlePropfindRequest("/new-dir", "1", { persist, logger, llm });
+    const hooks = createHooks(persist);
+    const result = await handlePropfindRequest("/new-dir", "1", { persist, logger, hooks });
     expect(result.response.status).toBe(207);
   });
 
@@ -62,12 +63,12 @@ describe("PROPFIND handler", () => {
     expect(result.response.headers?.["Content-Type"]).toContain("application/xml");
   });
 
-  it("generates listing for empty directory with LLM", async () => {
+  it("generates listing for empty directory with hooks", async () => {
     const persist = createMemoryAdapter();
     const logger = createLogger();
-    const llm = createLlm(persist);
+    const hooks = createHooks(persist);
     await persist.ensureDir(["empty-dir"]);
-    const result = await handlePropfindRequest("/empty-dir", "1", { persist, logger, llm });
+    const result = await handlePropfindRequest("/empty-dir", "1", { persist, logger, hooks });
     expect([200, 207]).toContain(result.response.status);
   });
 
@@ -80,4 +81,3 @@ describe("PROPFIND handler", () => {
     expect(contents).not.toContain("root");
   });
 });
-

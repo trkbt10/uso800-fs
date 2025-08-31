@@ -2,33 +2,32 @@
  * @file MKCOL handler (pure function)
  */
 import { handleMkcol as webdavMkcol } from "../../hono-middleware-webdav/handler";
-import type { HandlerOptions, HandlerResult, LlmLike } from "./types";
+import type { HandlerOptions, HandlerResult } from "./types";
+import type { WebDavHooks } from "../../webdav/hooks";
 
 /**
  * Handle MKCOL.
  */
 export async function handleMkcolRequest(
   urlPath: string,
-  options: HandlerOptions & { onGenerate?: (path: string[]) => void }
+  options: HandlerOptions
 ): Promise<HandlerResult> {
-  const { persist, logger, onGenerate } = options;
+  const { persist, logger, hooks } = options;
   logger?.logInput("MKCOL", urlPath);
-  const response = await webdavMkcol(persist, urlPath, { logger, onGenerate });
+  const parts = urlPath.split("/").filter(Boolean);
+  const pre = await (async (h: WebDavHooks | undefined) => {
+    if (!h?.beforeMkcol) { return undefined; }
+    try { return await h.beforeMkcol({ urlPath, segments: parts, persist, logger }); } catch { return undefined; }
+  })(hooks);
+  if (pre) {
+    return { response: pre };
+  }
+  const response = await webdavMkcol(persist, urlPath, { logger });
+  await (async (h: WebDavHooks | undefined) => {
+    if (!h?.afterMkcol) { return; }
+    try { await h.afterMkcol({ urlPath, segments: parts, persist, logger }, response); } catch { /* ignore */ }
+  })(hooks);
   return { response };
 }
 
-/**
- * Create onGenerate callback for MKCOL using LLM if available.
- */
-export function createMkcolOnGenerate(llm?: LlmLike): ((path: string[]) => void) | undefined {
-  if (!llm) {
-    return undefined;
-  }
-  return async (folder: string[]) => {
-    try {
-      await llm.fabricateListing(folder);
-    } catch {
-      // ignore
-    }
-  };
-}
+// createMkcolOnGenerate was removed in favor of WebDavHooks.

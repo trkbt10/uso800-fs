@@ -4,7 +4,8 @@
 import { handleGetRequest } from "../handlers";
 import { createMemoryAdapter } from "../../persist/memory";
 import type { WebDAVLogger } from "../../logging/webdav-logger";
-import type { LlmLike } from "../handlers";
+import type { WebDavHooks } from "../../webdav/hooks";
+import { createLlmWebDavHooks, type LlmOrchestrator } from "../../llm/webdav-hooks";
 
 function createLogger(): WebDAVLogger {
   const noop = () => {};
@@ -22,31 +23,27 @@ function createLogger(): WebDAVLogger {
   };
 }
 
-function createLlm(persist: ReturnType<typeof createMemoryAdapter>): LlmLike {
-  const impl: LlmLike = {
-    async fabricateListing(path) {
-      await persist.ensureDir(path);
-    },
-    async fabricateFileContent() {
-      return "Generated content";
-    },
+function createHooks(persist: ReturnType<typeof createMemoryAdapter>): WebDavHooks {
+  const llm: LlmOrchestrator = {
+    async fabricateListing(path) { await persist.ensureDir(path); },
+    async fabricateFileContent() { return "Generated content"; },
   };
-  return impl;
+  return createLlmWebDavHooks(llm);
 }
 
 describe("GET handler", () => {
-  it("returns 404 for non-existent file without LLM", async () => {
+  it("returns 404 for non-existent file without hooks", async () => {
     const persist = createMemoryAdapter();
     const logger = createLogger();
     const result = await handleGetRequest("/missing.txt", { persist, logger });
     expect(result.response.status).toBe(404);
   });
 
-  it("generates content for non-existent file with LLM", async () => {
+  it("generates content for non-existent file with hooks", async () => {
     const persist = createMemoryAdapter();
     const logger = createLogger();
-    const llm = createLlm(persist);
-    const result = await handleGetRequest("/gen.txt", { persist, logger, llm });
+    const hooks = createHooks(persist);
+    const result = await handleGetRequest("/gen.txt", { persist, logger, hooks });
     expect(result.response.status).toBe(200);
     const stored = await persist.readFile(["gen.txt"]);
     expect(new TextDecoder().decode(stored)).toBe("Generated content");
@@ -62,12 +59,12 @@ describe("GET handler", () => {
     expect(new TextDecoder().decode(body)).toBe("Existing content");
   });
 
-  it("generates content for empty file with LLM", async () => {
+  it("generates content for empty file with hooks", async () => {
     const persist = createMemoryAdapter();
     const logger = createLogger();
-    const llm = createLlm(persist);
+    const hooks = createHooks(persist);
     await persist.writeFile(["empty.txt"], new Uint8Array(0), "text/plain");
-    const result = await handleGetRequest("/empty.txt", { persist, logger, llm });
+    const result = await handleGetRequest("/empty.txt", { persist, logger, hooks });
     expect(result.response.status).toBe(200);
     const body = result.response.body as Uint8Array;
     expect(new TextDecoder().decode(body)).toBe("Generated content");
@@ -81,4 +78,3 @@ describe("GET handler", () => {
     expect(result.response.headers?.["Content-Type"]).toBe("text/html");
   });
 });
-

@@ -4,20 +4,14 @@
 import { pathToSegments } from "../../llm/utils/path-utils";
 import { handlePropfind as webdavPropfind } from "../../hono-middleware-webdav/handler";
 import type { HandlerOptions, HandlerResult } from "./types";
+import type { WebDavHooks } from "../../webdav/hooks";
 
-async function maybeGenerateListing(
-  segments: string[],
-  depth: string | null,
-  opts: HandlerOptions
-): Promise<boolean> {
-  if (!opts.llm) {
-    return false;
-  }
+async function runBeforePropfindHook(hooks: WebDavHooks | undefined, ctx: { urlPath: string; segments: string[]; depth: string | null; persist: HandlerOptions["persist"]; logger?: HandlerOptions["logger"] }) {
+  if (!hooks?.beforePropfind) { return undefined; }
   try {
-    await opts.llm.fabricateListing(segments, { depth });
-    return true;
+    return await hooks.beforePropfind({ urlPath: ctx.urlPath, segments: ctx.segments, depth: ctx.depth, persist: ctx.persist, logger: ctx.logger });
   } catch {
-    return false;
+    return undefined;
   }
 }
 
@@ -29,7 +23,7 @@ export async function handlePropfindRequest(
   depth: string | null | undefined,
   options: HandlerOptions
 ): Promise<HandlerResult> {
-  const { persist, logger, shouldIgnore } = options;
+  const { persist, logger, hooks, shouldIgnore } = options;
   const segments = pathToSegments(urlPath);
   const normalizedDepth: string | null = depth ?? null;
 
@@ -37,11 +31,11 @@ export async function handlePropfindRequest(
 
   const exists = await persist.exists(segments);
   if (!exists) {
-    const generated = await maybeGenerateListing(segments, normalizedDepth, options);
-    if (!generated) {
-      logger?.logList(urlPath, 404);
-      return { response: { status: 404 } };
+    const maybe = await runBeforePropfindHook(hooks, { urlPath, segments, depth: normalizedDepth, persist, logger });
+    if (maybe) {
+      return { response: maybe };
     }
+    // proceed to list (hook may have created it), else 404
     const response = await webdavPropfind(
       persist,
       urlPath,
@@ -49,7 +43,11 @@ export async function handlePropfindRequest(
       logger,
       shouldIgnore ? { shouldIgnore } : undefined
     );
-    return { response, sideEffects: { generated: true, llmCalled: true } };
+    if (response.status === 404) {
+      logger?.logList(urlPath, 404);
+      return { response };
+    }
+    return { response };
   }
 
   // Exists: if empty directory and LLM present, generate once
@@ -58,7 +56,7 @@ export async function handlePropfindRequest(
     if (st.type === "dir") {
       const names = await persist.readdir(segments);
       if (names.length === 0) {
-        const generated = await maybeGenerateListing(segments, normalizedDepth, options);
+        await runBeforePropfindHook(hooks, { urlPath, segments, depth: normalizedDepth, persist, logger });
         const response = await webdavPropfind(
           persist,
           urlPath,
@@ -66,9 +64,6 @@ export async function handlePropfindRequest(
           logger,
           shouldIgnore ? { shouldIgnore } : undefined
         );
-        if (generated) {
-          return { response, sideEffects: { generated: true, llmCalled: true } };
-        }
         return { response };
       }
     }

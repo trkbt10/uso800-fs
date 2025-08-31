@@ -4,7 +4,8 @@
 import { handlePutRequest } from "../handlers";
 import { createMemoryAdapter } from "../../persist/memory";
 import type { WebDAVLogger } from "../../logging/webdav-logger";
-import type { LlmLike } from "../handlers";
+import type { WebDavHooks } from "../../webdav/hooks";
+import { createLlmWebDavHooks, type LlmOrchestrator } from "../../llm/webdav-hooks";
 
 function createLogger(): WebDAVLogger {
   const noop = () => {};
@@ -22,11 +23,12 @@ function createLogger(): WebDAVLogger {
   };
 }
 
-function createLlm(): LlmLike {
-  return {
+function createHooks(): WebDavHooks {
+  const llm: LlmOrchestrator = {
     async fabricateListing() {},
     async fabricateFileContent() { return "Generated content"; },
   };
+  return createLlmWebDavHooks(llm);
 }
 
 describe("PUT handler", () => {
@@ -40,11 +42,11 @@ describe("PUT handler", () => {
     expect(new TextDecoder().decode(stored)).toBe("Test content");
   });
 
-  it("generates content for empty PUT with LLM", async () => {
+  it("generates content for empty PUT with hooks", async () => {
     const persist = createMemoryAdapter();
     const logger = createLogger();
-    const llm = createLlm();
-    const result = await handlePutRequest("/empty.txt", new Uint8Array(0), { persist, logger, llm });
+    const hooks = createHooks();
+    const result = await handlePutRequest("/empty.txt", new Uint8Array(0), { persist, logger, hooks });
     expect(result.response.status).toBe(201);
     const stored = await persist.readFile(["empty.txt"]);
     expect(new TextDecoder().decode(stored)).toBe("Generated content");
@@ -59,4 +61,3 @@ describe("PUT handler", () => {
     expect(stored.byteLength).toBe(0);
   });
 });
-
