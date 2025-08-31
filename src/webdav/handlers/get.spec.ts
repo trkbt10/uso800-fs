@@ -25,7 +25,10 @@ function createLogger(): WebDAVLogger {
 function createHooks(persist: ReturnType<typeof createMemoryAdapter>): WebDavHooks {
   return {
     async beforeGet({ urlPath, segments }) {
-      const isDir = segments.length > 0 && urlPath.endsWith("/");
+      const isDir = (() => {
+        if (segments.length === 0) { return false; }
+        return urlPath.endsWith("/");
+      })();
       if (!isDir) {
         // create file content when missing
         await persist.writeFile(segments, new TextEncoder().encode("Generated content"), "text/plain").catch(() => {});

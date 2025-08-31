@@ -1,7 +1,6 @@
 /**
  * @file Unit tests for path utilities
  */
-import { describe, it, expect } from "vitest";
 import { pathToSegments, segmentsToDisplayPath, validateSegments, isRootPath } from "./path-utils";
 
 describe("pathToSegments", () => {

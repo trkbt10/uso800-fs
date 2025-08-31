@@ -9,7 +9,7 @@ import type { PersistAdapter } from "./webdav/persist/types";
 import { makeWebdavApp } from "./webdav/server";
 import { createWebDAVLogger } from "./logging/webdav-logger";
 import type { Tracker } from "./logging/tracker";
-import { createConsoleTracker } from "./logging/tracker";
+// createConsoleTracker is not used; keep Tracker types only.
 import { createUsoFsLLMInstance } from "./llm/fs-llm";
 import { createLlmWebDavHooks } from "./llm/webdav-hooks";
 
@@ -48,12 +48,16 @@ function buildAbsurdInstruction(extra?: string): string {
 function createPersistAdapter(options: AppInitOptions, tracker?: Tracker): PersistAdapter {
   if (options.memoryOnly || !options.persistRoot) {
     tracker?.track("app.persist", { mode: "memory" });
-    if (!tracker) console.log("[uso800fs] Using in-memory storage (no persistence)");
+    if (!tracker) {
+      console.log("[uso800fs] Using in-memory storage (no persistence)");
+    }
     return createMemoryAdapter();
   }
 
   tracker?.track("app.persist", { mode: "fs", root: options.persistRoot });
-  if (!tracker) console.log("[uso800fs] Persistence root:", options.persistRoot);
+  if (!tracker) {
+    console.log("[uso800fs] Persistence root:", options.persistRoot);
+  }
   const nodeFs = createNodeFsAdapter(options.persistRoot);
   return createDataLoaderAdapter(nodeFs);
 }
@@ -88,7 +92,9 @@ function createLlm(options: AppInitOptions, persist: PersistAdapter, tracker?: T
     return null;
   }
 
-  if (!(options.tracker)) console.log("[uso800fs] LLM enabled with model:", model);
+  if (!(options.tracker)) {
+    console.log("[uso800fs] LLM enabled with model:", model);
+  }
 
   return createUsoFsLLMInstance(client, { model, instruction, persist, tracker });
 }
@@ -120,11 +126,15 @@ export function createApp(options: AppInitOptions = {}) {
       await persist.ensureDir([]);
       const names = await persist.readdir([]).catch(() => [] as string[]);
       if (names.length === 0) {
-        if (!options.tracker) console.log("[uso800fs] Bootstrapping initial filesystem (root)…");
+        if (!options.tracker) {
+          console.log("[uso800fs] Bootstrapping initial filesystem (root)…");
+        }
         await llm.fabricateListing([], { depth: "1" });
         const after = await persist.readdir([]).catch(() => [] as string[]);
         const summary = after.length > 0 ? after.join(", ") : "<none>";
-        if (!options.tracker) console.log(`[uso800fs] Bootstrap complete. Root items: ${summary}`);
+        if (!options.tracker) {
+          console.log(`[uso800fs] Bootstrap complete. Root items: ${summary}`);
+        }
       }
     } catch (e) {
       console.warn("[uso800fs] Bootstrap skipped due to error:", (e as Error)?.message ?? e);

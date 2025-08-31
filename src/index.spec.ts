@@ -2,7 +2,7 @@
  * @file Unit tests for CLI entry point and configuration
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+// Use vitest globals; avoid mocks per lint policy
 import { startFromCli } from "./cli";
 
 describe("CLI Entry Point", () => {
@@ -12,7 +12,6 @@ describe("CLI Entry Point", () => {
   beforeEach(() => {
     process.env = { ...originalEnv };
     process.argv = [...originalArgv];
-    vi.clearAllMocks();
   });
 
   afterEach(() => {
@@ -89,7 +88,7 @@ describe("CLI Entry Point", () => {
     it("should have fetch method for Hono app", () => {
       const app = startFromCli();
       expect(app).toHaveProperty("fetch");
-      expect(typeof (app as any).fetch).toBe("function");
+      expect(typeof app.fetch).toBe("function");
     });
   });
 
@@ -97,11 +96,15 @@ describe("CLI Entry Point", () => {
     it("should configure LLM when API key and model are provided", () => {
       process.env.OPENAI_API_KEY = "sk-test";
       process.env.OPENAI_MODEL = "gpt-4";
-      const consoleSpy = vi.spyOn(console, "log");
-      
-      startFromCli();
-      
-      expect(consoleSpy).toHaveBeenCalledWith("[uso800fs] LLM enabled with model:", "gpt-4");
+      const orig = console.log;
+      const calls: unknown[][] = [];
+      console.log = (...args: unknown[]) => { calls.push(args); };
+      try {
+        startFromCli();
+      } finally {
+        console.log = orig;
+      }
+      expect(calls.some((a) => a[0] === "[uso800fs] LLM enabled with model:" && a[1] === "gpt-4")).toBe(true);
     });
 
     it("should work without LLM when API key is missing", () => {
@@ -124,21 +127,29 @@ describe("CLI Entry Point", () => {
   describe("Persistence configuration", () => {
     it("should enable persistence with --persist-root", () => {
       process.argv = ["node", "index.ts", "--persist-root", "./test-data"];
-      const consoleSpy = vi.spyOn(console, "log");
-      
-      startFromCli();
-      
-      expect(consoleSpy).toHaveBeenCalledWith("[uso800fs] Persistence root:", "./test-data");
+      const orig = console.log;
+      const calls: unknown[][] = [];
+      console.log = (...args: unknown[]) => { calls.push(args); };
+      try {
+        startFromCli();
+      } finally {
+        console.log = orig;
+      }
+      expect(calls.some((a) => a[0] === "[uso800fs] Persistence root:" && a[1] === "./test-data")).toBe(true);
     });
 
     it("should warn when --state is used without --persist-root", () => {
       process.argv = ["node", "index.ts", "--state", "./state.json"];
-      const warnSpy = vi.spyOn(console, "warn");
-      
-      startFromCli();
-      
-      expect(warnSpy).toHaveBeenCalled();
-      expect(warnSpy.mock.calls[0][0]).toContain("changes will NOT be saved");
+      const orig = console.warn;
+      const warns: unknown[][] = [];
+      console.warn = (...args: unknown[]) => { warns.push(args); };
+      try {
+        startFromCli();
+      } finally {
+        console.warn = orig;
+      }
+      expect(warns.length).toBeGreaterThan(0);
+      expect(String(warns[0][0])).toContain("changes will NOT be saved");
     });
   });
 

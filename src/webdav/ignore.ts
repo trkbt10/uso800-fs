@@ -1,8 +1,17 @@
 /**
  * @file Ignore helpers: glob -> RegExp, path ignore predicate, and filtered PersistAdapter.
+ * What it looks like: a simple mapper from glob to RegExp and a boolean checker.
+ * What it actually does: normalizes paths to POSIX style, safely escapes regex tokens,
+ * restores glob tokens (**/*/?), and provides a filtered PersistAdapter that excludes
+ * ignored entries on readdir. It also applies quick-path checks for common OS metadata
+ * files (e.g. .DS_Store, AppleDouble) to avoid unnecessary regex work.
  */
 import type { PersistAdapter, PathParts } from "./persist/types";
 
+/**
+ * Escapes special regex characters in a literal string, preserving meaning when
+ * later interpolated into a RegExp. Prevents accidental character class or group creation.
+ */
 export function escapeRegExpLiteral(input: string): string {
   let out = "";
   for (const ch of input) {
@@ -25,6 +34,11 @@ export function escapeRegExpLiteral(input: string): string {
   return out;
 }
 
+/**
+ * Converts a glob pattern to a RegExp. This is a conservative converter that
+ * restores glob tokens after escaping: **/, **, *, ?. Paths are normalized to
+ * forward slashes before matching.
+ */
 export function globToRegExp(glob: string): RegExp {
   // Normalize path to POSIX-style
   const g = glob.replace(/\\/g, "/");
@@ -38,6 +52,10 @@ export function globToRegExp(glob: string): RegExp {
   return new RegExp(`^${re}$`);
 }
 
+/**
+ * Builds default ignore RegExps plus user-provided globs.
+ * Defaults include OS metadata and internal folders.
+ */
 export function buildIgnoreRegexps(globs?: string[]): RegExp[] {
   const defaults = [
     "**/._*",
@@ -57,6 +75,10 @@ export function buildIgnoreRegexps(globs?: string[]): RegExp[] {
   return all.map((p) => globToRegExp(p));
 }
 
+/**
+ * Creates a predicate that checks if a pathname should be ignored.
+ * Applies quick short-circuits for known metadata files to reduce overhead.
+ */
 export function isIgnoredFactory(ignoreRes: RegExp[]) {
   return function isIgnored(pathname: string): boolean {
     const p = pathname.replace(/\\/g, "/");
@@ -79,6 +101,10 @@ export function isIgnoredFactory(ignoreRes: RegExp[]) {
   };
 }
 
+/**
+ * Wraps a PersistAdapter to filter out ignored entries from readdir.
+ * Note: it does not block readFile/stat calls; callers should check ignored paths earlier.
+ */
 export function createIgnoreFilteringAdapter(base: PersistAdapter, isIgnored: (p: string) => boolean): PersistAdapter {
   function isChildIgnored(dirParts: PathParts, name: string): boolean {
     const prefix = "/" + (dirParts.length > 0 ? dirParts.join("/") + "/" : "");

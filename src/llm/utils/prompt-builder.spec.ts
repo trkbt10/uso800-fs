@@ -1,7 +1,6 @@
 /**
  * @file Unit tests for prompt builder
  */
-import { describe, it, expect } from "vitest";
 import {
   buildListingPrompt,
   buildFileContentPrompt,

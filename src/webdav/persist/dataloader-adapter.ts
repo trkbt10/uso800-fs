@@ -10,7 +10,7 @@ function keyOf(parts: PathParts): PathKey {
   if (!Array.isArray(parts)) {
     return "/";
   }
-  return "/" + parts.filter((p) => p && p !== "/").join("/");
+  return "/" + parts.filter((p) => { if (!p) { return false; } return p !== "/"; }).join("/");
 }
 
 /**
@@ -75,7 +75,7 @@ export function createDataLoaderAdapter(base: PersistAdapter): PersistAdapter {
     }
   }
 
-  function clearCachesForTree(path: PathParts): void {
+  function clearCachesForTree(): void {
     // Clear all caches when directory structure changes
     existsLoader.clearAll();
     statLoader.clearAll();
@@ -121,7 +121,7 @@ export function createDataLoaderAdapter(base: PersistAdapter): PersistAdapter {
     async remove(path: PathParts, opts?: { recursive?: boolean }): Promise<void> {
       await base.remove(path, opts);
       if (opts?.recursive) {
-        clearCachesForTree(path);
+        clearCachesForTree();
       } else {
         clearCachesForPath(path);
       }

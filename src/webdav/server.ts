@@ -24,6 +24,12 @@ import {
 import type { WebDavHooks } from "./hooks";
 import { createDavStateStore } from "./dav-state";
 
+/**
+ * Creates a Hono-based WebDAV app using the provided PersistAdapter.
+ * Superficially, it looks like a thin router; in reality, it also enforces
+ * method-specific invariants (e.g., MKCOL body rejection, LOCK token checks),
+ * injects default WebDAV headers, and integrates directory/file ignore filters.
+ */
 export function makeWebdavApp(opts: {
   persist: PersistAdapter;
   hooks?: WebDavHooks;
@@ -159,7 +165,9 @@ export function makeWebdavApp(opts: {
         if (bodyText && bodyText.length > 0) {
           return send(c, { status: 415 });
         }
-      } catch {}
+      } catch (_e) {
+        // Ignore body read errors intentionally; MKCOL with body is unsupported.
+      }
       const persist = basePersist;
       const result = await handleMkcolRequest(p, { persist, hooks, logger });
       return send(c, result.response);

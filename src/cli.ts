@@ -95,11 +95,11 @@ function parseCli(argv: string[]) {
   return out;
 }
 
-interface AppWithPortAndTracker {
+type AppWithPortAndTracker = {
   fetch: (req: Request) => Response | Promise<Response>;
   port: number;
   tracker?: Tracker;
-}
+};
 
 /**
  * Starts the application from the command line interface.

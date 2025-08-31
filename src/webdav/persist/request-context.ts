@@ -10,7 +10,7 @@ function keyOf(parts: PathParts): PathKey {
   if (!Array.isArray(parts)) {
     return "/";
   }
-  return "/" + parts.filter((p) => p && p !== "/").join("/");
+  return "/" + parts.filter((p) => { if (!p) { return false; } return p !== "/"; }).join("/");
 }
 
 /**
