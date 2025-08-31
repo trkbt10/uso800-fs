@@ -224,15 +224,19 @@ export async function handleGet(
       // Return simple HTML index for directories
       const children = await persist.readdir(parts);
       const bodyParts = [`<html><body><h1>Index of /${parts.join("/")}</h1><ul>`];
-      
-      for (const name of children) {
+
+      const entries = await Promise.all(children.map(async (name) => {
         const childPath = [...parts, name];
-      const childStat = await statOrNull(persist, childPath);
-      if (!childStat) { continue; }
+        const childStat = await statOrNull(persist, childPath);
+        return { name, childStat } as const;
+      }));
+
+      for (const { name, childStat } of entries) {
+        if (!childStat) { continue; }
         const isDir = childStat.type === "dir";
         bodyParts.push(`<li><a href="${encodeURIComponent(name)}${isDir ? "/" : ""}">${name}</a></li>`);
       }
-      
+
       bodyParts.push("</ul></body></html>");
       const body = bodyParts.join("");
       

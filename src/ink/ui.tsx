@@ -133,6 +133,73 @@ function formatFSEvent(e: TrackEvent): string {
   return `${e.ts} ${op} ${path} ${status}`;
 }
 
+function ActivityLine({ event, index }: { event: TrackEvent; index: number }) {
+  const p = event.payload as any;
+  const timestamp = event.ts.substring(11, 19);
+  const path = p.path || "";
+  const fileName = path.split('/').pop() || path;
+  
+  // Determine the operation type and styling
+  const isLLMCreated = event.channel === "llm.end" && p.context === "fabricateFileContent";
+  const isMkdir = event.channel === "fs.mkdir";
+  const isWrite = event.channel === "fs.write";
+  const isRead = event.channel === "fs.read";
+  const isDelete = event.channel === "fs.delete";
+  const isPropfind = event.channel === "webdav" && p.method === "PROPFIND";
+  const isGet = event.channel === "webdav" && p.method === "GET";
+  const isPut = event.channel === "webdav" && p.method === "PUT";
+  const isMkcol = event.channel === "webdav" && p.method === "MKCOL";
+  
+  let icon = "•";
+  let action = "";
+  let color = "gray";
+  let actionColor = "white";
+  
+  if (isLLMCreated) {
+    icon = "🤖";
+    action = "CREATE";
+    color = "magenta";
+    actionColor = "magenta";
+  } else if (isMkcol || isMkdir) {
+    icon = "📁";
+    action = "MKDIR";
+    color = "blue";
+    actionColor = "blue";
+  } else if (isPut || isWrite) {
+    icon = "✏️";
+    action = "WRITE";
+    color = "green";
+    actionColor = "green";
+  } else if (isGet || isRead) {
+    icon = "👁";
+    action = "READ";
+    color = "cyan";
+    actionColor = "cyan";
+  } else if (isDelete) {
+    icon = "🗑";
+    action = "DELETE";
+    color = "red";
+    actionColor = "red";
+  } else if (isPropfind) {
+    icon = "🔍";
+    action = "LIST";
+    color = "yellow";
+    actionColor = "yellow";
+  }
+  
+  if (!action) return null;
+  
+  // eslint-disable-next-line react/no-array-index-key
+  return (
+    <Box key={index} marginBottom={0}>
+      <Text dimColor color="gray">{timestamp} </Text>
+      <Text>{icon}</Text>
+      <Text color={actionColor} bold>[{action}]</Text>
+      <Text color={color}> {fileName}</Text>
+    </Box>
+  );
+}
+
 export function InkApp({ store }: { store: Store }) {
   const [events, setEvents] = useState<TrackEvent[]>(store.getState().events);
   const [time, setTime] = useState(new Date());
@@ -141,8 +208,10 @@ export function InkApp({ store }: { store: Store }) {
   // Calculate dimensions based on terminal size
   const termWidth = stdout.columns || 80;
   const termHeight = stdout.rows || 24;
-  const panelHeight = Math.max(10, termHeight - 14); // More space for header, stats and mode info
+  const topPanelHeight = Math.max(8, Math.floor((termHeight - 16) * 0.6)); // 60% for top panels
+  const bottomPanelHeight = Math.max(6, Math.floor((termHeight - 16) * 0.4)); // 40% for activity log
   const panelWidth = Math.floor((termWidth - 4) / 2); // Two panels side by side
+  const fullWidth = termWidth - 3; // Full width for bottom panel
   
   useEffect(() => store.subscribe(() => setEvents(store.getState().events)), [store]);
   useEffect(() => {
@@ -158,6 +227,16 @@ export function InkApp({ store }: { store: Store }) {
   
   const fsEvents = events.filter((e: TrackEvent) => e.channel.startsWith("fs."));
   const fsOps = fsEvents.map(formatFSEvent);
+  
+  // Activity events for the bottom panel
+  const activityEvents = events.filter((e: TrackEvent) => {
+    const p = e.payload as any;
+    return (
+      (e.channel === "llm.end" && p.context === "fabricateFileContent") ||
+      (e.channel === "webdav" && ["MKCOL", "PUT", "GET", "PROPFIND", "DELETE"].includes(p.method)) ||
+      e.channel.startsWith("fs.")
+    );
+  });
   
   // Calculate stats
   const reqCount = httpEvents.filter((e: any) => e.payload?.direction === "IN").length;
@@ -226,14 +305,37 @@ export function InkApp({ store }: { store: Store }) {
         </Box>
       </Box>
       
-      {/* Main Panels */}
-      <Box paddingX={1} flexGrow={1} marginTop={1}>
-        <Panel title="WebDAV I/O" borderColor="yellow" width={panelWidth} height={panelHeight}>
-          <Lines items={http} maxLines={panelHeight - 4} color="yellow" />
+      {/* Top Panels */}
+      <Box paddingX={1} marginTop={1}>
+        <Panel title="WebDAV I/O" borderColor="yellow" width={panelWidth} height={topPanelHeight}>
+          <Lines items={http} maxLines={topPanelHeight - 4} color="yellow" />
         </Panel>
-        <Panel title="LLM Sessions" borderColor="magenta" width={panelWidth} height={panelHeight}>
-          <Lines items={llmCombined} maxLines={panelHeight - 4} color="magenta" isLLM={true} />
+        <Panel title="LLM Sessions" borderColor="magenta" width={panelWidth} height={topPanelHeight}>
+          <Lines items={llmCombined} maxLines={topPanelHeight - 4} color="magenta" isLLM={true} />
         </Panel>
+      </Box>
+      
+      {/* Bottom Activity Panel */}
+      <Box paddingX={1} marginTop={1}>
+        <Box
+          flexDirection="column"
+          borderStyle="round"
+          borderColor="green"
+          paddingX={1}
+          width={fullWidth}
+          height={bottomPanelHeight}
+        >
+          <Box borderStyle="bold" borderBottom borderColor="green" paddingBottom={0} marginBottom={1}>
+            <Text bold color="green">▶ File System Activity</Text>
+            <Spacer />
+            <Text dimColor>🤖 LLM | 📁 Dir | ✏️ Write | 👁 Read</Text>
+          </Box>
+          <Box flexGrow={1} flexDirection="column" overflow="hidden">
+            {activityEvents.slice(-(bottomPanelHeight - 3)).map((event, i) => (
+              <ActivityLine key={`activity-${i}`} event={event} index={i} />
+            ))}
+          </Box>
+        </Box>
       </Box>
     </Box>
   );

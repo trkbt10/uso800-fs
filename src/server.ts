@@ -6,7 +6,7 @@ import { Hono, type Context } from "hono";
 import { handleOptions, type DavResponse } from "./hono-middleware-webdav/handler";
 import type { PersistAdapter } from "./persist/types";
 import { createWebDAVLogger, type WebDAVLogger } from "./logging/webdav-logger";
-import { RequestContextFactory } from "./persist/request-context";
+// We use the provided PersistAdapter directly to avoid cache staleness
 import { buildIgnoreRegexps, isIgnoredFactory } from "./server/ignore";
 import {
   handleGetRequest,
@@ -36,7 +36,6 @@ export function makeWebdavApp(opts: {
   ignoreGlobs?: string[];
 }) {
   const basePersist = opts.persist;
-  const persistFactory = new RequestContextFactory(basePersist);
   const llm = opts.llm;
   const logger = opts.logger ?? createWebDAVLogger();
   const app = new Hono();
@@ -48,8 +47,10 @@ export function makeWebdavApp(opts: {
    * Sends a DavResponse through Hono's Context with proper headers.
    */
   function send(c: Context, res: DavResponse) {
-    const init: ResponseInit = { status: res.status, headers: res.headers };
-    const body = (res.body ?? "") as BodyInit;
+    const status = res.status;
+    const init: ResponseInit = { status, headers: res.headers };
+    const noBody = status === 204 || status === 304;
+    const body = noBody ? undefined : (res.body as BodyInit | undefined);
     return new Response(body, init);
   }
 
@@ -81,7 +82,7 @@ export function makeWebdavApp(opts: {
     const ignored = maybeIgnore(c, "GET");
     if (ignored) { return ignored; }
     const p = c.req.path;
-    const persist = persistFactory.createContext();
+    const persist = basePersist;
     const result = await handleGetRequest(p, { persist, llm, logger });
     return send(c, result.response);
   });
@@ -90,14 +91,14 @@ export function makeWebdavApp(opts: {
     const ignored = maybeIgnore(c, "HEAD");
     if (ignored) { return ignored; }
     const p = c.req.path;
-    const persist = persistFactory.createContext();
+    const persist = basePersist;
     const result = await handleHeadRequest(p, { persist, logger });
     return send(c, result.response);
   });
 
   app.on("PUT", "/*", async (c) => {
     const p = c.req.path;
-    const persist = persistFactory.createContext();
+    const persist = basePersist;
     const body = await c.req.arrayBuffer();
     
     // Use the tested handler
@@ -108,7 +109,7 @@ export function makeWebdavApp(opts: {
   app.on("DELETE", "/*", async (c) => {
     logger?.logInput("DELETE", c.req.path);
     const p = c.req.path;
-    const persist = persistFactory.createContext();
+    const persist = basePersist;
     const result = await handleDeleteRequest(p, { persist, logger });
     return send(c, result.response);
   });
@@ -124,7 +125,7 @@ export function makeWebdavApp(opts: {
       // Ignore paths return 404 to avoid spurious LIST logs for noise files
       if (isIgnored(p)) { logger?.logOutput("PROPFIND", p, 404); return send(c, { status: 404 }); }
 
-      const persist = persistFactory.createContext();
+      const persist = basePersist;
       
       // Use the tested handler with ignore filtering
       const result = await handlePropfindRequest(p, depth, { 
@@ -142,7 +143,7 @@ export function makeWebdavApp(opts: {
     }
 
     if (method === "MKCOL") {
-      const persist = persistFactory.createContext();
+      const persist = basePersist;
       
       // Use the tested handler with onGenerate callback
       const onGenerate = createMkcolOnGenerate(llm);
@@ -157,7 +158,7 @@ export function makeWebdavApp(opts: {
         return send(c, { status: 400 });
       }
 
-      const persist = persistFactory.createContext();
+      const persist = basePersist;
       const destUrl = new URL(destination);
       const result = await handleMoveRequest(p, destUrl.pathname, { persist, logger });
       return send(c, result.response);
@@ -169,7 +170,7 @@ export function makeWebdavApp(opts: {
         return send(c, { status: 400 });
       }
 
-      const persist = persistFactory.createContext();
+      const persist = basePersist;
       const destUrl = new URL(destination);
       const result = await handleCopyRequest(p, destUrl.pathname, { persist, logger });
       return send(c, result.response);
