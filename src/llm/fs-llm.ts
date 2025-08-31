@@ -1,7 +1,7 @@
 /**
  * @file LLM orchestrator that works directly with PersistAdapter.
  */
-import type { PersistAdapter } from "../persist/types";
+import type { PersistAdapter } from "../webdav/persist/types";
 import type { Tracker } from "../logging/tracker";
 import { getOpenAIToolsSpec, normalizeAction, type ToolSpec } from "./actions/tools";
 import { runToolCallStreaming } from "./utils/response-stream";

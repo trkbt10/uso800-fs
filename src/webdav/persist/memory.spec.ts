@@ -23,4 +23,3 @@ describe("persist/MemoryAdapter", () => {
     expect(list3).toEqual(expect.arrayContaining(["b.txt"]));
   });
 });
-

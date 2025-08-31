@@ -1,5 +1,5 @@
 /**
- * @file DataLoader-based PersistAdapter wrapper for batching and deduplication.
+ * @file Request context management for DataLoader isolation per request.
  */
 import DataLoader from "dataloader";
 import type { PersistAdapter, PathParts, Stat } from "./types";
@@ -14,19 +14,17 @@ function keyOf(parts: PathParts): PathKey {
 }
 
 /**
- * Creates a DataLoader-wrapped PersistAdapter that batches and deduplicates
- * read operations within the same tick/context.
+ * Creates a new set of DataLoaders for a single request context.
+ * This ensures that each request has its own cache and batching context.
  */
-export function createDataLoaderAdapter(base: PersistAdapter): PersistAdapter {
-  // Create separate DataLoaders for each read operation type
-  // These will batch and deduplicate requests within the same tick
-  
+export function createRequestContext(base: PersistAdapter): PersistAdapter {
+  // Create fresh DataLoaders for this request
   const existsLoader = new DataLoader<PathKey, boolean>(async (keys) => {
     return Promise.all(keys.map(async (key) => {
       const parts = key === "/" ? [] : key.slice(1).split("/");
       return base.exists(parts);
     }));
-  }, { cache: true });
+  }, { cache: true, maxBatchSize: 100 });
 
   const statLoader = new DataLoader<PathKey, Stat | null>(async (keys) => {
     return Promise.all(keys.map(async (key) => {
@@ -37,7 +35,7 @@ export function createDataLoaderAdapter(base: PersistAdapter): PersistAdapter {
         return null;
       }
     }));
-  }, { cache: true });
+  }, { cache: true, maxBatchSize: 100 });
 
   const readdirLoader = new DataLoader<PathKey, string[]>(async (keys) => {
     return Promise.all(keys.map(async (key) => {
@@ -48,7 +46,7 @@ export function createDataLoaderAdapter(base: PersistAdapter): PersistAdapter {
         return [];
       }
     }));
-  }, { cache: true });
+  }, { cache: true, maxBatchSize: 50 });
 
   const readFileLoader = new DataLoader<PathKey, Uint8Array | null>(async (keys) => {
     return Promise.all(keys.map(async (key) => {
@@ -59,7 +57,7 @@ export function createDataLoaderAdapter(base: PersistAdapter): PersistAdapter {
         return null;
       }
     }));
-  }, { cache: true });
+  }, { cache: true, maxBatchSize: 20 });
 
   // For write operations, we need to clear relevant caches
   function clearCachesForPath(path: PathParts): void {
@@ -73,14 +71,6 @@ export function createDataLoaderAdapter(base: PersistAdapter): PersistAdapter {
       const parentKey = keyOf(path.slice(0, -1));
       readdirLoader.clear(parentKey);
     }
-  }
-
-  function clearCachesForTree(path: PathParts): void {
-    // Clear all caches when directory structure changes
-    existsLoader.clearAll();
-    statLoader.clearAll();
-    readdirLoader.clearAll();
-    readFileLoader.clearAll();
   }
 
   return {
@@ -120,10 +110,13 @@ export function createDataLoaderAdapter(base: PersistAdapter): PersistAdapter {
 
     async remove(path: PathParts, opts?: { recursive?: boolean }): Promise<void> {
       await base.remove(path, opts);
+      clearCachesForPath(path);
+      // Also clear all child paths if recursive
       if (opts?.recursive) {
-        clearCachesForTree(path);
-      } else {
-        clearCachesForPath(path);
+        existsLoader.clearAll();
+        statLoader.clearAll();
+        readdirLoader.clearAll();
+        readFileLoader.clearAll();
       }
     },
 
@@ -138,4 +131,18 @@ export function createDataLoaderAdapter(base: PersistAdapter): PersistAdapter {
       clearCachesForPath(to);
     },
   };
+}
+
+/**
+ * Factory to create request-scoped PersistAdapter instances.
+ */
+export class RequestContextFactory {
+  constructor(private base: PersistAdapter) {}
+
+  /**
+   * Creates a new PersistAdapter with isolated DataLoader context for a single request.
+   */
+  createContext(): PersistAdapter {
+    return createRequestContext(this.base);
+  }
 }

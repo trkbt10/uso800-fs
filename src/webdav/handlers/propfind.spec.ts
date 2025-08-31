@@ -1,8 +1,8 @@
 /**
  * @file Unit tests for PROPFIND handler (co-located)
  */
-import { handlePropfindRequest } from "../../webdav/handlers";
-import { createMemoryAdapter } from "../../persist/memory";
+import { handlePropfindRequest } from "./propfind";
+import { createMemoryAdapter } from "../persist/memory";
 import type { WebDAVLogger } from "../../logging/webdav-logger";
 import type { WebDavHooks } from "../../webdav/hooks";
 import { createLlmWebDavHooks, type LlmOrchestrator } from "../../llm/webdav-hooks";

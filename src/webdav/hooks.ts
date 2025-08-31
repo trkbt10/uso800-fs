@@ -4,7 +4,7 @@
  * These hooks are optional and async. Handlers call them (await) to allow
  * external logic (e.g., LLM) to intervene without coupling WebDAV core to it.
  */
-import type { PersistAdapter } from "../persist/types";
+import type { PersistAdapter } from "./persist/types";
 import type { WebDAVLogger } from "../logging/webdav-logger";
 import type { DavResponse } from "./handlers/types";
 

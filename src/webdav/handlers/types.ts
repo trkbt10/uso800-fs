@@ -1,7 +1,7 @@
 /**
  * @file Shared types for server handlers
  */
-import type { PersistAdapter } from "../../persist/types";
+import type { PersistAdapter } from "../persist/types";
 import type { WebDAVLogger } from "../../logging/webdav-logger";
 
 export type DavResponse = {

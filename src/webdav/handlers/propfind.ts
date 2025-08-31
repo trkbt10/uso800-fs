@@ -1,7 +1,7 @@
 /**
  * @file PROPFIND handler (pure function)
  */
-import { pathToSegments } from "../../llm/utils/path-utils";
+import { pathToSegments } from "../../utils/path-utils";
 import type { HandlerOptions, HandlerResult } from "../../webdav/handlers/types";
 import type { WebDavHooks } from "../../webdav/hooks";
 
@@ -56,7 +56,7 @@ export async function handlePropfindRequest(
   return { response };
 }
 
-import type { PersistAdapter, Stat } from "../../persist/types";
+import type { PersistAdapter, Stat } from "../persist/types";
 import type { WebDAVLogger } from "../../logging/webdav-logger";
 import type { DavResponse } from "../../webdav/handlers/types";
 

@@ -2,7 +2,7 @@
  * @file HTTP GET handler with Range support, delegating to WebDAV GET when not partial.
  */
 import type { HandlerOptions, HandlerResult } from "../../webdav/handlers/types";
-import { pathToSegments } from "../../llm/utils/path-utils";
+import { pathToSegments } from "../../utils/path-utils";
 import { handleGetRequest } from "../../webdav/handlers/get";
 
 /**

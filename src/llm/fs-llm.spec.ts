@@ -2,7 +2,7 @@
  * @file Unit tests for LLM orchestrator with PersistAdapter
  */
 import { createUsoFsLLMInstance } from "./fs-llm";
-import { createMemoryAdapter } from "../persist/memory";
+import { createMemoryAdapter } from "../webdav/persist/memory";
 import type { Responses } from "openai/resources/responses/responses";
 
 describe("fs-llm with PersistAdapter", () => {

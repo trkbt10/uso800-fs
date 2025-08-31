@@ -1,11 +1,10 @@
 /**
  * @file Unit tests for PUT handler (co-located)
  */
-import { handlePutRequest } from "../../webdav/handlers";
-import { createMemoryAdapter } from "../../persist/memory";
+import { handlePutRequest } from "./put";
+import { createMemoryAdapter } from "../persist/memory";
 import type { WebDAVLogger } from "../../logging/webdav-logger";
-import type { WebDavHooks } from "../../webdav/hooks";
-import { createLlmWebDavHooks, type LlmOrchestrator } from "../../llm/webdav-hooks";
+import type { WebDavHooks } from "../hooks";
 
 function createLogger(): WebDAVLogger {
   const noop = () => {};
@@ -24,11 +23,13 @@ function createLogger(): WebDAVLogger {
 }
 
 function createHooks(): WebDavHooks {
-  const llm: LlmOrchestrator = {
-    async fabricateListing() {},
-    async fabricateFileContent() { return "Generated content"; },
+  return {
+    async beforePut({ body, setBody }) {
+      if (body.length === 0) {
+        setBody(new TextEncoder().encode("Generated content"), "text/plain");
+      }
+    },
   };
-  return createLlmWebDavHooks(llm);
 }
 
 describe("PUT handler", () => {

@@ -5,7 +5,7 @@
 import { Hono, type Context } from "hono";
 import type { DavResponse } from "./handlers/types";
 import { handleOptions } from "./handlers/options";
-import type { PersistAdapter } from "../persist/types";
+import type { PersistAdapter } from "./persist/types";
 import { createWebDAVLogger, type WebDAVLogger } from "../logging/webdav-logger";
 import { buildIgnoreRegexps, isIgnoredFactory } from "./ignore";
 import {
@@ -17,8 +17,10 @@ import {
   handleDeleteRequest,
   handleMoveRequest,
   handleCopyRequest,
-  handleLockRequest, handleUnlockRequest, handleProppatchRequest,
-} from "./handlers";
+  handleLockRequest,
+  handleUnlockRequest,
+  handleProppatchRequest,
+} from "./";
 import type { WebDavHooks } from "./hooks";
 import { createDavStateStore } from "./dav-state";
 
@@ -71,18 +73,24 @@ export function makeWebdavApp(opts: {
 
   app.get("/*", async (c) => {
     const ignored = maybeIgnore(c, "GET");
-    if (ignored) { return ignored; }
+    if (ignored) {
+      return ignored;
+    }
     const p = c.req.path;
     const persist = basePersist;
     const hdrs: Record<string, string> = {};
-    for (const [k, v] of c.req.raw.headers) { hdrs[k] = v; }
+    for (const [k, v] of c.req.raw.headers) {
+      hdrs[k] = v;
+    }
     const result = await handleHttpGetRequest(p, hdrs, { persist, hooks, logger });
     return send(c, result.response);
   });
 
   app.on("HEAD", "/*", async (c) => {
     const ignored = maybeIgnore(c, "HEAD");
-    if (ignored) { return ignored; }
+    if (ignored) {
+      return ignored;
+    }
     const p = c.req.path;
     const persist = basePersist;
     const result = await handleHeadRequest(p, { persist, logger });
@@ -125,17 +133,24 @@ export function makeWebdavApp(opts: {
 
     if (method === "PROPFIND") {
       const depth = c.req.header("Depth") ?? null;
-      if (isIgnored(p)) { logger?.logOutput("PROPFIND", p, 404); return send(c, { status: 404 }); }
+      if (isIgnored(p)) {
+        logger?.logOutput("PROPFIND", p, 404);
+        return send(c, { status: 404 });
+      }
       const persist = basePersist;
       const result = await handlePropfindRequest(p, depth, {
         persist,
         hooks,
         logger,
         shouldIgnore: (full: string, base: string) => {
-          if (isIgnored(full)) { return true; }
-          if (isIgnored(base)) { return true; }
+          if (isIgnored(full)) {
+            return true;
+          }
+          if (isIgnored(base)) {
+            return true;
+          }
           return false;
-        }
+        },
       });
       return send(c, result.response);
     }
@@ -172,7 +187,9 @@ export function makeWebdavApp(opts: {
 
     if (method === "MOVE") {
       const destination = c.req.header("Destination");
-      if (!destination) { return send(c, { status: 400 }); }
+      if (!destination) {
+        return send(c, { status: 400 });
+      }
       const overwrite = (c.req.header("Overwrite") ?? "T").toUpperCase() !== "F";
       const persist = basePersist;
       const destUrl = new URL(destination);
@@ -182,7 +199,9 @@ export function makeWebdavApp(opts: {
 
     if (method === "COPY") {
       const destination = c.req.header("Destination");
-      if (!destination) { return send(c, { status: 400 }); }
+      if (!destination) {
+        return send(c, { status: 400 });
+      }
       const overwrite = (c.req.header("Overwrite") ?? "T").toUpperCase() !== "F";
       const persist = basePersist;
       const destUrl = new URL(destination);
@@ -195,4 +214,3 @@ export function makeWebdavApp(opts: {
 
   return app;
 }
-

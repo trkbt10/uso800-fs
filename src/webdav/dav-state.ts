@@ -1,7 +1,7 @@
 /**
  * @file DAV sidecar state stored on PersistAdapter (locks, properties).
  */
-import type { PersistAdapter } from "../persist/types";
+import type { PersistAdapter } from "./persist/types";
 
 type LockRecord = { token: string; updatedAt: string };
 type PropsRecord = Record<string, string>;

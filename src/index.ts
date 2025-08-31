@@ -2,10 +2,10 @@
  * @file Library entry point using PersistAdapter directly (no fakefs).
  */
 import OpenAI from "openai";
-import { createMemoryAdapter } from "./persist/memory";
-import { createNodeFsAdapter } from "./persist/node-fs";
-import { createDataLoaderAdapter } from "./persist/dataloader-adapter";
-import type { PersistAdapter } from "./persist/types";
+import { createMemoryAdapter } from "./webdav/persist/memory";
+import { createNodeFsAdapter } from "./webdav/persist/node-fs";
+import { createDataLoaderAdapter } from "./webdav/persist/dataloader-adapter";
+import type { PersistAdapter } from "./webdav/persist/types";
 import { makeWebdavApp } from "./webdav/server";
 import { createWebDAVLogger } from "./logging/webdav-logger";
 import type { Tracker } from "./logging/tracker";

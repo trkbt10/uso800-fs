@@ -1,11 +1,10 @@
 /**
  * @file Unit tests for GET handler (co-located)
  */
-import { handleGetRequest } from "../../webdav/handlers";
-import { createMemoryAdapter } from "../../persist/memory";
+import { handleGetRequest } from "./get";
+import { createMemoryAdapter } from "../persist/memory";
 import type { WebDAVLogger } from "../../logging/webdav-logger";
-import type { WebDavHooks } from "../../webdav/hooks";
-import { createLlmWebDavHooks, type LlmOrchestrator } from "../../llm/webdav-hooks";
+import type { WebDavHooks } from "../hooks";
 
 function createLogger(): WebDAVLogger {
   const noop = () => {};
@@ -24,11 +23,17 @@ function createLogger(): WebDAVLogger {
 }
 
 function createHooks(persist: ReturnType<typeof createMemoryAdapter>): WebDavHooks {
-  const llm: LlmOrchestrator = {
-    async fabricateListing(path) { await persist.ensureDir(path); },
-    async fabricateFileContent() { return "Generated content"; },
+  return {
+    async beforeGet({ urlPath, segments }) {
+      const isDir = segments.length > 0 && urlPath.endsWith("/");
+      if (!isDir) {
+        // create file content when missing
+        await persist.writeFile(segments, new TextEncoder().encode("Generated content"), "text/plain").catch(() => {});
+      } else {
+        await persist.ensureDir(segments).catch(() => {});
+      }
+    },
   };
-  return createLlmWebDavHooks(llm);
 }
 
 describe("GET handler", () => {

@@ -2,7 +2,7 @@
  * @file MOVE/COPY handlers (pure functions)
  */
 import type { HandlerOptions, HandlerResult } from "../../webdav/handlers/types";
-import { pathToSegments } from "../../llm/utils/path-utils";
+import { pathToSegments } from "../../utils/path-utils";
 
 /**
  * Handle MOVE.

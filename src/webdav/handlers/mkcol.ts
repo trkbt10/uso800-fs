@@ -3,7 +3,7 @@
  */
 import type { HandlerOptions, HandlerResult } from "../../webdav/handlers/types";
 import type { WebDavHooks } from "../../webdav/hooks";
-import { pathToSegments } from "../../llm/utils/path-utils";
+import { pathToSegments } from "../../utils/path-utils";
 
 /**
  * Handle MKCOL.

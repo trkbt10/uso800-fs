@@ -2,7 +2,7 @@
  * @file DELETE handler (pure function)
  */
 import type { HandlerOptions, HandlerResult } from "../../webdav/handlers/types";
-import { pathToSegments } from "../../llm/utils/path-utils";
+import { pathToSegments } from "../../utils/path-utils";
 
 /**
  * Handle DELETE.

@@ -1,11 +1,10 @@
 /**
  * @file Unit tests for MKCOL handler (co-located)
  */
-import { handleMkcolRequest } from "../../webdav/handlers";
-import { createMemoryAdapter } from "../../persist/memory";
+import { handleMkcolRequest } from "./mkcol";
+import { createMemoryAdapter } from "../persist/memory";
 import type { WebDAVLogger } from "../../logging/webdav-logger";
-import type { WebDavHooks } from "../../webdav/hooks";
-import { createLlmWebDavHooks, type LlmOrchestrator } from "../../llm/webdav-hooks";
+import type { WebDavHooks } from "../hooks";
 
 function createLogger(): WebDAVLogger {
   const noop = () => {};
@@ -36,9 +35,7 @@ describe("MKCOL handler", () => {
     const persist = createMemoryAdapter();
     const logger = createLogger();
     const calls: number[] = [];
-    const hooks: WebDavHooks = {
-      async afterMkcol() { calls.push(1); }
-    };
+    const hooks: WebDavHooks = { async afterMkcol() { calls.push(1); } };
     await handleMkcolRequest("/with-callback", { persist, logger, hooks });
     expect(calls.length).toBe(1);
   });
@@ -51,23 +48,15 @@ describe("MKCOL handler", () => {
   });
 });
 
-describe("createLlmWebDavHooks", () => {
-  it("afterMkcol uses LLM fabricateListing and swallows errors", async () => {
+describe("afterMkcol behavior", () => {
+  it("afterMkcol can create directories and errors are swallowed", async () => {
     const persist = createMemoryAdapter();
-    const llmOk: LlmOrchestrator = {
-      async fabricateListing(path) { await persist.ensureDir(path); },
-      async fabricateFileContent() { return ""; },
-    };
-    const hooksOk = createLlmWebDavHooks(llmOk);
+    const hooksOk: WebDavHooks = { async afterMkcol({ segments }) { await persist.ensureDir(segments); } };
     await hooksOk.afterMkcol?.({ urlPath: "/folder", segments: ["folder"], persist, logger: createLogger() }, { status: 201 });
     expect(await persist.exists(["folder"])).toBe(true);
 
-    const llmFail: LlmOrchestrator = {
-      async fabricateListing() { throw new Error("fail"); },
-      async fabricateFileContent() { return ""; },
-    };
-    const hooksFail = createLlmWebDavHooks(llmFail);
-    await hooksFail.afterMkcol?.({ urlPath: "/x", segments: ["x"], persist, logger: createLogger() }, { status: 201 });
-    // should not throw
+    const hooksFail: WebDavHooks = { async afterMkcol() { throw new Error("fail"); } };
+    // Ensure the handler swallows afterMkcol errors
+    await expect(handleMkcolRequest("/x", { persist, logger: createLogger(), hooks: hooksFail })).resolves.toBeTruthy();
   });
 });

@@ -1,7 +1,7 @@
 /**
  * @file Ignore helpers: glob -> RegExp, path ignore predicate, and filtered PersistAdapter.
  */
-import type { PersistAdapter, PathParts } from "../persist/types";
+import type { PersistAdapter, PathParts } from "./persist/types";
 
 export function escapeRegExpLiteral(input: string): string {
   let out = "";
