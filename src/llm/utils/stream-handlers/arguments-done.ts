@@ -17,6 +17,16 @@ export const handleArgumentsDone: StreamEventHandler<Responses.ResponseFunctionC
   const current = context.argsByItem.get(event.item_id);
   
   if (!current) {
+    // Debug logging
+    if (context.options?.logger) {
+      await context.options.logger.write({
+        type: "debug.arguments_done.no_current",
+        ts: new Date().toISOString(),
+        sessionId: context.sessionId,
+        itemId: event.item_id,
+        argsByItemKeys: Array.from(context.argsByItem.keys()),
+      });
+    }
     return;
   }
 

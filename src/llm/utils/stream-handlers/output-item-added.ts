@@ -9,16 +9,43 @@ import { extractOutputItem, isFunctionCallItem } from "../response-guards/functi
 /**
  * Handles output item added events by registering new function call items.
  */
-export const handleOutputItemAdded: StreamEventHandler<Responses.ResponseOutputItemAddedEvent> = (
+export const handleOutputItemAdded: StreamEventHandler<Responses.ResponseOutputItemAddedEvent> = async (
   event,
   context
 ) => {
   const itemData = extractOutputItem(event.item);
+  const isFunctionCall = isFunctionCallItem(event.item);
   
-  if (isFunctionCallItem(event.item) && itemData.id) {
+  // Debug logging
+  if (context.options?.logger) {
+    await context.options.logger.write({
+      type: "debug.output_item_added",
+      ts: new Date().toISOString(),
+      sessionId: context.sessionId,
+      itemData,
+      isFunctionCall,
+      eventItem: event.item,
+      itemType: event.item?.type,
+      hasId: !!itemData.id,
+    });
+  }
+  
+  if (isFunctionCall && itemData.id) {
     context.argsByItem.set(itemData.id, { 
       name: itemData.name, 
       buf: "" 
     });
+    
+    // Debug logging after setting
+    if (context.options?.logger) {
+      await context.options.logger.write({
+        type: "debug.output_item_added.set",
+        ts: new Date().toISOString(),
+        sessionId: context.sessionId,
+        itemId: itemData.id,
+        name: itemData.name,
+        argsByItemKeys: Array.from(context.argsByItem.keys()),
+      });
+    }
   }
 };

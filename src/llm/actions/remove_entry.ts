@@ -9,7 +9,19 @@ import type { ToolAction } from "./types";
 type RemoveEntryAction = { type: "remove_entry"; params: { path: string[] } };
 
 export const remove_entry: ToolAction<RemoveEntryAction> = {
-  function: { type: "function", name: "remove_entry", strict: true },
+  function: {
+    type: "function",
+    name: "remove_entry",
+    strict: true,
+    parameters: {
+      type: "object",
+      properties: {
+        path: { type: "array", items: { type: "string" } },
+      },
+      required: ["path"],
+      additionalProperties: false,
+    },
+  },
   normalize: (params: Record<string, unknown>): RemoveEntryAction | undefined => {
     const path = isStringArray(params.path) ? params.path : undefined;
     if (!path) {
@@ -21,4 +33,3 @@ export const remove_entry: ToolAction<RemoveEntryAction> = {
     removeEntry(state, action.params.path);
   },
 };
-

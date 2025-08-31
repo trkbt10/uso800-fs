@@ -13,6 +13,7 @@ import { normalizeAction, reduceFs, getOpenAIToolsSpec } from "./actions/index";
 import type { Responses } from "openai/resources/responses/responses";
 import type { ResponseStream } from "openai/lib/responses/ResponseStream";
 import type { Stream as OpenAIStream } from "openai/core/streaming";
+import { createConsoleStreamLogger } from "./utils/console-logger";
 
 // Minimal client surface (mirrors agents usage in usodb-llm)
 type ResponsesStreamLike =
@@ -94,21 +95,23 @@ export function createUsoFsLLMInstance(
       "Use emit_fs_listing to create directories/files. Avoid plain text output.",
       "REQUEST=" + JSON.stringify({ path: folderPath.join("/") !== "" ? folderPath.join("/") : "/" }),
     ].join("\n\n");
+    const request = {
+      model: args.model,
+      instructions: args.instruction,
+      input: [{ role: "user", content: prompt }],
+      tools: toolsSpec(),
+      tool_choice: "required" as const,
+    };
+    const logger = createConsoleStreamLogger("[uso800fs][fabricateListing]");
     await runToolCallStreaming<void>(
-      ensureAsyncIterable(await client.responses.stream({
-        model: args.model,
-        instructions: args.instruction,
-        input: [{ role: "user", content: prompt }],
-        tools: toolsSpec(),
-        tool_choice: "required",
-      })),
+      ensureAsyncIterable(await client.responses.stream(request)),
       ({ name, params }) => {
         if (!name) {
           return undefined;
         }
         return applyTool(name, params);
       },
-      { endAfterFirst: true },
+      { endAfterFirst: true, logger, request },
     );
   }
 
@@ -122,21 +125,23 @@ export function createUsoFsLLMInstance(
       "Use emit_file_content to deliver the content. Avoid plain text output.",
       "REQUEST=" + JSON.stringify({ path: pathParts.join("/") !== "" ? pathParts.join("/") : "/" }),
     ].join("\n\n");
+    const request = {
+      model: args.model,
+      instructions: args.instruction,
+      input: [{ role: "user", content: prompt }],
+      tools: toolsSpec(),
+      tool_choice: "required" as const,
+    };
+    const logger = createConsoleStreamLogger("[uso800fs][fabricateFileContent]");
     const res = await runToolCallStreaming<string>(
-      ensureAsyncIterable(await client.responses.stream({
-        model: args.model,
-        instructions: args.instruction,
-        input: [{ role: "user", content: prompt }],
-        tools: toolsSpec(),
-        tool_choice: "required",
-      })),
+      ensureAsyncIterable(await client.responses.stream(request)),
       ({ name, params }) => {
         if (!name) {
           return undefined;
         }
         return applyTool(name, params);
       },
-      { endAfterFirst: true },
+      { endAfterFirst: true, logger, request },
     );
     return typeof res === "string" ? res : "";
   }

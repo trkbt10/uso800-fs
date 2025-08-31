@@ -8,11 +8,40 @@ import type { ToolAction } from "./types";
 
 type EmitFsListingAction = {
   type: "emit_fs_listing";
-  params: { folder: string[]; entries: Array<{ kind: "dir" | "file"; name: string; content?: string; mime?: string }> };
+  params: {
+    folder: string[];
+    entries: Array<{ kind: "dir" | "file"; name: string; content: string; mime: string }>;
+  };
 };
 
 export const emit_fs_listing: ToolAction<EmitFsListingAction> = {
-  function: { type: "function", name: "emit_fs_listing", strict: true },
+  function: {
+    type: "function",
+    name: "emit_fs_listing",
+    strict: true,
+    parameters: {
+      type: "object",
+      properties: {
+        folder: { type: "array", items: { type: "string" } },
+        entries: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              kind: { type: "string", enum: ["dir", "file"] },
+              name: { type: "string" },
+              content: { type: "string" },
+              mime: { type: "string" },
+            },
+            required: ["kind", "name", "content", "mime"],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ["folder", "entries"],
+      additionalProperties: false,
+    },
+  },
   normalize: (params: Record<string, unknown>): EmitFsListingAction | undefined => {
     const folder = isStringArray(params.folder) ? params.folder : undefined;
     const entries = toEntries(params.entries);
@@ -28,9 +57,8 @@ export const emit_fs_listing: ToolAction<EmitFsListingAction> = {
       if (e.kind === "dir") {
         ensureDir(state, [...folder, e.name]);
       } else {
-        putFile(state, [...folder, e.name], e.content ?? "", e.mime);
+        putFile(state, [...folder, e.name], e.content, e.mime);
       }
     }
   },
 };
-

@@ -84,8 +84,19 @@ export async function runToolCallStreaming<T>(
     }
 
     // Handle output item added events
-    if (isOutputItemAddedEvent(ev)) {
-      handleOutputItemAdded(ev, context);
+    const isOutputItem = isOutputItemAddedEvent(ev);
+    if (options?.logger) {
+      await options.logger.write({
+        type: "debug.isOutputItemCheck",
+        ts: new Date().toISOString(),
+        sessionId: context.sessionId,
+        isOutputItem,
+        evType: ev.type,
+        hasItem: typeof (ev as { item?: unknown }).item !== "undefined",
+      });
+    }
+    if (isOutputItem) {
+      await handleOutputItemAdded(ev, context);
       continue;
     }
 
