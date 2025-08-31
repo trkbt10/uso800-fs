@@ -5,6 +5,7 @@
 import OpenAI from "openai";
 import { createUsoFsLLMInstance } from "./llm/fs-llm";
 import { createNodeFsAdapter } from "./persist/node-fs";
+import { createLockedPersistAdapter } from "./persist/lock";
 import type { PersistAdapter } from "./persist/types";
 import { makeWebdavApp, type LlmFactory } from "./server";
 import { readFileSync, existsSync } from "node:fs";
@@ -69,9 +70,13 @@ export function startFromCli() {
   const model = args.model ?? process.env.OPENAI_MODEL;
   const instruction = buildAbsurdInstruction(args.instruction);
 
-  const persist: PersistAdapter | undefined = args.persistRoot ? createNodeFsAdapter(args.persistRoot) : undefined;
+  const persist: PersistAdapter | undefined = args.persistRoot ? createLockedPersistAdapter(createNodeFsAdapter(args.persistRoot)) : undefined;
   if (persist && args.persistRoot) {
     console.log("[uso800fs] Persistence root:", args.persistRoot);
+  } else if (args.state) {
+    // Clarify that --state is only used to seed initial in-memory state
+    console.warn("[uso800fs] Warning: --state provided without --persist-root; changes will NOT be saved to", args.state);
+    console.warn("[uso800fs]          Use --persist-root to enable write-through persistence.");
   }
 
   const llmFactory: LlmFactory | undefined = (() => {
@@ -111,7 +116,8 @@ export function startFromCli() {
   })();
 
   // Build Hono app
-  const app = makeWebdavApp({ state, statePath: args.state, deps: { persist, llmFactory } });
+  const llm = llmFactory ? llmFactory({ state }) : undefined;
+  const app = makeWebdavApp({ state, statePath: args.state, deps: { persist, llm } });
   if (args.port) {
     console.log(`[uso800fs] WebDAV server listening on 127.0.0.1:${args.port}`);
   }

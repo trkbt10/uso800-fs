@@ -28,15 +28,14 @@ export type LlmFactory = (a: { state: FsState }) => LlmLike;
 export function makeWebdavApp(opts: {
   state: FsState;
   statePath?: string;
-  deps?: { persist?: PersistAdapter; llmFactory?: LlmFactory; llm?: LlmLike };
+  deps: { persist?: PersistAdapter; llm?: LlmLike };
 }) {
   const state = opts.state;
   // statePath is currently unused because persistence is handled via PersistAdapter
-  const persist = opts.deps?.persist;
-  let currentLlm = opts.deps?.llm;
-  const llmFactory = opts.deps?.llmFactory;
+  const persist = opts.deps.persist;
+  const currentLlm = opts.deps.llm;
   const app = new Hono();
-  const hasLLM = () => typeof currentLlm !== "undefined" || typeof llmFactory !== "undefined";
+  const hasLLM = () => typeof currentLlm !== "undefined";
 
   async function syncFolderToPersist(parts: string[]) {
     if (!persist) {
@@ -120,7 +119,24 @@ export function makeWebdavApp(opts: {
   /**
    * Sends a DavResponse through Hono's Context with proper headers.
    */
-  function send(c: Context, res: DavResponse) {
+  function logWeb(stage: "request" | "response", c: Context, extra?: Record<string, unknown>) {
+    const payload: Record<string, unknown> = {
+      type: "webdav",
+      stage,
+      ts: new Date().toISOString(),
+      method: c.req.method,
+      path: c.req.path,
+    };
+    if (extra && typeof extra === "object") {
+      for (const [k, v] of Object.entries(extra)) {
+        payload[k] = v;
+      }
+    }
+    console.log("[uso800fs][webdav] " + JSON.stringify(payload));
+  }
+
+  function send(c: Context, res: DavResponse, info?: Record<string, unknown>) {
+    logWeb("response", c, { status: res.status, ...info });
     const init: ResponseInit = { status: res.status, headers: res.headers };
     const body = (res.body ?? "") as BodyInit;
     return new Response(body, init);
@@ -131,6 +147,12 @@ export function makeWebdavApp(opts: {
     c.header("DAV", "1,2");
     c.header("MS-Author-Via", "DAV");
     c.header("Allow", "OPTIONS, PROPFIND, MKCOL, GET, HEAD");
+    const depth = c.req.header("Depth");
+    if (typeof depth === "string") {
+      logWeb("request", c, { depth });
+    } else {
+      logWeb("request", c);
+    }
     await next();
   });
 
@@ -143,33 +165,34 @@ export function makeWebdavApp(opts: {
     const p = c.req.path;
     const initial = handleGet(state, p);
     if (initial.status !== 404) {
-      return send(c, initial);
+      return send(c, initial, { source: "state" });
     }
     const parts = p.split("/").filter((s) => s);
     if (await loadFileFromPersist(parts)) {
-      return send(c, handleGet(state, p));
+      return send(c, handleGet(state, p), { source: "persist" });
     }
     if (!hasLLM()) {
-      return send(c, initial);
+      return send(c, initial, { source: "none" });
     }
-    if (!currentLlm && llmFactory) {
-      currentLlm = llmFactory({ state });
+    const llm = currentLlm;
+    if (!llm) {
+      return send(c, initial, { source: "none" });
     }
-    const text = await currentLlm!.fabricateFileContent(parts);
+    const text = await llm.fabricateFileContent(parts);
     if (text && typeof text === "string") {
       const mime = "text/plain";
       ensureDir(state, parts.slice(0, -1));
       putFile(state, parts, text, mime);
       await syncFileToPersist(parts);
-      return send(c, handleGet(state, p));
+      return send(c, handleGet(state, p), { source: "llm" });
     }
-    return send(c, initial);
+    return send(c, initial, { source: "none" });
   });
 
   app.on("HEAD", "/*", (c) => {
     const p = c.req.path;
     const res = handleHead(state, p);
-    return send(c, res);
+    return send(c, res, { source: "state" });
   });
 
   // WebDAV-specific methods via c.req.method
@@ -180,38 +203,39 @@ export function makeWebdavApp(opts: {
       const depth = c.req.header("Depth") ?? null;
       const initial = handlePropfind(state, p, depth);
       if (initial.status !== 404) {
-        return send(c, initial);
+        return send(c, initial, { source: "state" });
       }
       const parts = p.split("/").filter((s) => s);
       await loadFolderFromPersist(parts);
       const afterPersist = handlePropfind(state, p, depth);
       if (afterPersist.status !== 404) {
-        return send(c, afterPersist);
+        return send(c, afterPersist, { source: "persist" });
       }
       if (!hasLLM()) {
-        return send(c, initial);
+        return send(c, initial, { source: "none" });
       }
-      if (!currentLlm && llmFactory) {
-        currentLlm = llmFactory({ state });
+      const llm = currentLlm;
+      if (!llm) {
+        return send(c, initial, { source: "none" });
       }
-      await currentLlm!.fabricateListing(parts);
+      await llm.fabricateListing(parts);
       await syncFolderToPersist(parts);
-      return send(c, handlePropfind(state, p, depth));
+      return send(c, handlePropfind(state, p, depth), { source: "llm" });
     }
     if (method === "MKCOL") {
       const parts = p.split("/").filter((s) => s);
       const res = handleMkcol(state, p);
       // Prefer LLM-driven listing if available
       if (hasLLM()) {
-        if (!currentLlm && llmFactory) {
-          currentLlm = llmFactory({ state });
+        const llm = currentLlm;
+        if (llm) {
+          await llm.fabricateListing(parts);
         }
-        await currentLlm!.fabricateListing(parts);
         await syncFolderToPersist(parts);
-      } else {
-        await syncFolderToPersist(parts);
+        return send(c, res, { llmUsed: true });
       }
-      return send(c, res);
+      await syncFolderToPersist(parts);
+      return send(c, res, { llmUsed: false });
     }
     await next();
   });
