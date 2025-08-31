@@ -24,8 +24,6 @@ import {
 import type { WebDavHooks } from "./hooks";
 import { createDavStateStore } from "./dav-state";
 
-export type LlmLike = never;
-
 export function makeWebdavApp(opts: {
   persist: PersistAdapter;
   hooks?: WebDavHooks;
@@ -57,15 +55,15 @@ export function makeWebdavApp(opts: {
   });
 
   app.options("/*", (c) => {
-    logger?.logInput("OPTIONS", c.req.path);
+    logger.logInput("OPTIONS", c.req.path);
     return send(c, handleOptions(logger));
   });
 
   function maybeIgnore(c: Context, method: string): Response | null {
     const p = c.req.path;
-    logger?.logInput(method, p);
+    logger.logInput(method, p);
     if (isIgnored(p)) {
-      logger?.logOutput(method, p, 404);
+      logger.logOutput(method, p, 404);
       return send(c, { status: 404 });
     }
     return null;
@@ -113,7 +111,7 @@ export function makeWebdavApp(opts: {
   });
 
   app.on("DELETE", "/*", async (c) => {
-    logger?.logInput("DELETE", c.req.path);
+    logger.logInput("DELETE", c.req.path);
     const p = c.req.path;
     const persist = basePersist;
     const curLock = await davState.getLock(p);
@@ -134,7 +132,7 @@ export function makeWebdavApp(opts: {
     if (method === "PROPFIND") {
       const depth = c.req.header("Depth") ?? null;
       if (isIgnored(p)) {
-        logger?.logOutput("PROPFIND", p, 404);
+        logger.logOutput("PROPFIND", p, 404);
         return send(c, { status: 404 });
       }
       const persist = basePersist;
