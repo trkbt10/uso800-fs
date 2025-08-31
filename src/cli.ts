@@ -7,7 +7,7 @@ import createApp from "./index";
 import { pathToFileURL } from "node:url";
 
 function parseCli(argv: string[]) {
-  const out: { port?: number; state?: string; model?: string; instruction?: string; persistRoot?: string } = {};
+  const out: { port?: number; state?: string; model?: string; instruction?: string; persistRoot?: string; ignore?: string[]; ui?: boolean } = {};
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
     if (a === "--port") {
@@ -35,6 +35,18 @@ function parseCli(argv: string[]) {
       i += 1;
       continue;
     }
+    if (a === "--ignore") {
+      const pat = argv[i + 1];
+      if (typeof pat === "string" && pat.length > 0) {
+        out.ignore = [...(out.ignore ?? []), pat];
+      }
+      i += 1;
+      continue;
+    }
+    if (a === "--ui") {
+      out.ui = true;
+      continue;
+    }
   }
   return out;
 }
@@ -48,11 +60,32 @@ export function startFromCli() {
    * Does not start the HTTP server; caller decides how to serve it.
    */
   const args = parseCli(process.argv.slice(2));
+
+  // Optional UI tracker hookup
+  let tracker: import("./logging/tracker").Tracker | undefined;
+  if (args.ui) {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const storeMod = require("./ink/store");
+    const created = storeMod.createTrackStore();
+    tracker = created.tracker;
+    // eslint-disable-next-line @typescript-eslint/no-floating-promises
+    (async () => {
+      try {
+        const ui = await import("./ink/ui");
+        ui.runInkUI(created.globalStore);
+      } catch (e) {
+        console.warn("[uso800fs] UI unavailable:", (e as Error)?.message ?? e);
+      }
+    })();
+  }
+
   const app = createApp({
     state: args.state,
     persistRoot: args.persistRoot,
     model: args.model,
     instruction: args.instruction,
+    ignore: args.ignore,
+    tracker,
   });
   const maybeApp = app as HonoLike;
   if (!hasFetcher(maybeApp)) {
@@ -78,6 +111,19 @@ if (import.meta && typeof import.meta.url === "string") {
   if (isMain) {
     const appWithPort = startFromCli();
     serve({ fetch: appWithPort.fetch!.bind(appWithPort), port: appWithPort.port, hostname: "127.0.0.1" });
-    console.log(`[uso800fs] WebDAV server listening on 127.0.0.1:${appWithPort.port}`);
+    const args = parseCli(process.argv.slice(2));
+    if (args.ui) {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const storeMod = require("./ink/store");
+        const state = storeMod.globalStore?.getState?.();
+        const tracker = (storeMod.createTrackStore?.() ?? {}).tracker;
+        tracker?.track("app.port", { host: "127.0.0.1", port: appWithPort.port });
+      } catch {
+        // ignore
+      }
+    } else {
+      console.log(`[uso800fs] WebDAV server listening on 127.0.0.1:${appWithPort.port}`);
+    }
   }
 }

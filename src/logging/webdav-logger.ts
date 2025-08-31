@@ -26,16 +26,16 @@ export type WebDAVLogger = {
 /**
  * Creates a WebDAV logger that outputs to console with structured format.
  */
-export function createWebDAVLogger(): WebDAVLogger {
+import type { Tracker } from "./tracker";
+import { createConsoleTracker } from "./tracker";
+
+export function createWebDAVLogger(tracker?: Tracker): WebDAVLogger {
+  const sink: Tracker = tracker ?? createConsoleTracker("[WebDAV]");
+
   function log(direction: "IN" | "OUT", message: string, details?: Record<string, unknown>): void {
     const timestamp = new Date().toISOString();
-    const logEntry = {
-      timestamp,
-      direction,
-      message,
-      ...details,
-    };
-    console.log(`[WebDAV ${direction}] ${JSON.stringify(logEntry)}`);
+    const logEntry = { timestamp, direction, message, ...details };
+    sink.track("webdav", logEntry);
   }
 
   return {
@@ -66,39 +66,27 @@ export function createWebDAVLogger(): WebDAVLogger {
     },
 
     logRead(path: string, status: number, size?: number): void {
-      log("OUT", `READ ${path}`, {
-        operation: "READ",
-        path,
-        status,
-        size,
-      });
+      const entry = { operation: "READ", path, status, size } as const;
+      log("OUT", `READ ${path}`, entry as unknown as Record<string, unknown>);
+      sink.track("fs.read", entry);
     },
 
     logWrite(path: string, status: number, size?: number): void {
-      log("OUT", `WRITE ${path}`, {
-        operation: "WRITE",
-        path,
-        status,
-        size,
-      });
+      const entry = { operation: "WRITE", path, status, size } as const;
+      log("OUT", `WRITE ${path}`, entry as unknown as Record<string, unknown>);
+      sink.track("fs.write", entry);
     },
 
     logList(path: string, status: number, itemCount?: number): void {
-      log("OUT", `LIST ${path}`, {
-        operation: "LIST",
-        path,
-        status,
-        itemCount,
-      });
+      const entry = { operation: "LIST", path, status, itemCount } as const;
+      log("OUT", `LIST ${path}`, entry as unknown as Record<string, unknown>);
+      sink.track("fs.list", entry);
     },
 
     logCreate(path: string, status: number, isDir: boolean): void {
-      log("OUT", `CREATE ${path}`, {
-        operation: "CREATE",
-        path,
-        status,
-        type: isDir ? "directory" : "file",
-      });
+      const entry = { operation: "CREATE", path, status, type: isDir ? "directory" : "file" } as const;
+      log("OUT", `CREATE ${path}`, entry as unknown as Record<string, unknown>);
+      sink.track("fs.create", entry);
     },
 
     logDelete(path: string, status: number): void {

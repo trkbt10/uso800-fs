@@ -15,8 +15,7 @@ export const emit_file_content: ToolAction<EmitFileContentAction> = {
     name: "emit_file_content",
     strict: true,
     description:
-      "Generate short, cohesive text for the requested file. " +
-      "Respect the filename extension and any MIME hints.",
+      "Generate short, cohesive text for the requested file. " + "Respect the filename extension and any MIME hints.",
     parameters: {
       type: "object",
       description: "Parameters for fabricating a file's textual content.",
@@ -25,7 +24,12 @@ export const emit_file_content: ToolAction<EmitFileContentAction> = {
           type: "array",
           description: "Target path segments from the root. Last segment is the filename.",
           minItems: 1,
-          items: { type: "string", description: "A single path segment (no slashes).", minLength: 1, pattern: "^[^/]+$" },
+          items: {
+            type: "string",
+            description: "A single path segment (no slashes).",
+            minLength: 1,
+            pattern: "^[^/]+$",
+          },
         },
         content: {
           type: "string",
@@ -35,7 +39,6 @@ export const emit_file_content: ToolAction<EmitFileContentAction> = {
         mime: {
           type: "string",
           description: "The MIME type for the content (e.g., text/plain, text/markdown).",
-          pattern: "^[a-zA-Z0-9!#$&^_.+-]+\/[a-zA-Z0-9!#$&^_.+-]+$",
         },
       },
       required: ["path", "content", "mime"],

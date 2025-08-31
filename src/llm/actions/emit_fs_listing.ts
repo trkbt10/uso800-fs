@@ -33,7 +33,12 @@ export const emit_fs_listing: ToolAction<EmitFsListingAction> = {
         folder: {
           type: "array",
           description: "Target path segments from the root. Empty array means root.",
-          items: { type: "string", description: "A single path segment (no slashes).", minLength: 1, pattern: "^[^/]+$" },
+          items: {
+            type: "string",
+            description: "A single path segment (no slashes).",
+            minLength: 1,
+            pattern: "^[^/]+$",
+          },
         },
         entries: {
           type: "array",
@@ -58,7 +63,6 @@ export const emit_fs_listing: ToolAction<EmitFsListingAction> = {
               mime: {
                 type: "string",
                 description: "If kind=file, the MIME type for the content (e.g., text/plain, text/markdown).",
-                pattern: "^[a-zA-Z0-9!#$&^_.+-]+\/[a-zA-Z0-9!#$&^_.+-]+$",
               },
             },
             required: ["kind", "name", "content", "mime"],
