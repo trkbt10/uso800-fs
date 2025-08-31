@@ -141,7 +141,7 @@ export function InkApp({ store }: { store: Store }) {
   // Calculate dimensions based on terminal size
   const termWidth = stdout.columns || 80;
   const termHeight = stdout.rows || 24;
-  const panelHeight = Math.max(10, termHeight - 10); // Leave some space for header and stats
+  const panelHeight = Math.max(10, termHeight - 14); // More space for header, stats and mode info
   const panelWidth = Math.floor((termWidth - 4) / 2); // Two panels side by side
   
   useEffect(() => store.subscribe(() => setEvents(store.getState().events)), [store]);
@@ -163,6 +163,11 @@ export function InkApp({ store }: { store: Store }) {
   const reqCount = httpEvents.filter((e: any) => e.payload?.direction === "IN").length;
   const resCount = httpEvents.filter((e: any) => e.payload?.direction === "OUT").length;
   const llmCalls = llmEvents.filter((e: TrackEvent) => e.channel === "llm.start").length;
+  
+  // Detect mode from events
+  const persistMode = events.find((e: TrackEvent) => e.channel === "app.persist")?.payload as { mode?: string; root?: string } | undefined;
+  const appPort = events.find((e: TrackEvent) => e.channel === "app.port")?.payload as { host?: string; port?: number } | undefined;
+  const llmModel = llmEvents.find((e: TrackEvent) => e.channel === "llm.start")?.payload as { model?: string } | undefined;
 
   const Gradient = gradient.default || gradient;
   
@@ -193,8 +198,36 @@ export function InkApp({ store }: { store: Store }) {
         </Box>
       </Box>
       
+      {/* Mode Info Bar */}
+      <Box paddingX={2} marginBottom={2}>
+        <Box borderStyle="double" borderColor="cyan" paddingX={1} paddingY={0} width="100%">
+          <Box flexDirection="column">
+            <Box marginBottom={0}>
+              <Text color="cyan" bold>▸ Mode: </Text>
+              <Text color="white">{persistMode?.mode === "fs" ? "Persistent" : persistMode?.mode === "memory" ? "In-Memory" : "Unknown"}</Text>
+              {persistMode?.root && (
+                <>
+                  <Text dimColor> | Root: </Text>
+                  <Text color="blue">{persistMode.root}</Text>
+                </>
+              )}
+            </Box>
+            <Box>
+              <Text color="cyan" bold>▸ Server: </Text>
+              <Text color="white">{appPort ? `${appPort.host || "127.0.0.1"}:${appPort.port || 8787}` : "Starting..."}</Text>
+              {llmModel?.model && (
+                <>
+                  <Text dimColor> | LLM: </Text>
+                  <Text color="magenta">{llmModel.model}</Text>
+                </>
+              )}
+            </Box>
+          </Box>
+        </Box>
+      </Box>
+      
       {/* Main Panels */}
-      <Box paddingX={1} flexGrow={1}>
+      <Box paddingX={1} flexGrow={1} marginTop={1}>
         <Panel title="WebDAV I/O" borderColor="yellow" width={panelWidth} height={panelHeight}>
           <Lines items={http} maxLines={panelHeight - 4} color="yellow" />
         </Panel>

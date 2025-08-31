@@ -3,7 +3,7 @@
  * 
  * This module is framework-agnostic: Hono routes call these functions.
  */
-import type { PersistAdapter } from "../persist/types";
+import type { PersistAdapter, Stat } from "../persist/types";
 import type { WebDAVLogger } from "../logging/webdav-logger";
 
 export type DavResponse = { 
@@ -37,6 +37,15 @@ function xmlEscape(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+async function statOrNull(persist: PersistAdapter, path: string[]): Promise<Stat | null> {
+  try {
+    return await persist.stat(path);
+  } catch {
+    return null;
+  }
+}
+
+
 /**
  * Handle WebDAV PROPFIND request using PersistAdapter.
  */
@@ -44,7 +53,8 @@ export async function handlePropfind(
   persist: PersistAdapter,
   urlPath: string,
   depth: string | null,
-  logger?: WebDAVLogger
+  logger?: WebDAVLogger,
+  options?: { shouldIgnore?: (fullPath: string, baseName: string) => boolean }
 ): Promise<DavResponse> {
   const parts = splitPath(urlPath);
   
@@ -72,8 +82,8 @@ export async function handlePropfind(
   <D:href>${selfHref}</D:href>
   <D:propstat>
     <D:prop>
-      <D:displayname>${xmlEscape(parts[parts.length - 1] || "/")}</D:displayname>
-      <D:getcontentlength>${stat.size || 0}</D:getcontentlength>
+      <D:displayname>${xmlEscape(parts[parts.length - 1] ?? "/")}</D:displayname>
+      <D:getcontentlength>${stat.size ?? 0}</D:getcontentlength>
       <D:resourcetype>${isDir ? "<D:collection/>" : ""}</D:resourcetype>
     </D:prop>
     <D:status>HTTP/1.1 200 OK</D:status>
@@ -81,33 +91,46 @@ export async function handlePropfind(
 </D:response>`);
 
     // Add children if depth !== "0" and it's a directory
-    let itemCount = 0;
-    if (depth !== "0" && isDir) {
-      try {
+    const itemNames = await (async () => {
+      if (depth !== "0" && isDir) {
         const children = await persist.readdir(parts);
-        itemCount = children.length;
-        
-        for (const name of children) {
-          const childPath = [...parts, name];
-          const childStat = await persist.stat(childPath);
-          const childIsDir = childStat.type === "dir";
-          
-          xmlParts.push(`
+        if (options?.shouldIgnore) {
+          const filtered = children.filter((name) => {
+            const full = `${urlPath.endsWith("/") ? urlPath : urlPath + "/"}${name}`;
+            return !options.shouldIgnore?.(full, name);
+          });
+          return filtered;
+        }
+        return children;
+      }
+      return [] as string[];
+    })();
+    const itemCount = itemNames.length;
+
+    // Fetch all child stats concurrently for performance
+    const childStats = await Promise.all(
+      itemNames.map(async (name) => {
+        const childPath = [...parts, name];
+        const st = await statOrNull(persist, childPath);
+        return { name, stat: st } as const;
+      })
+    );
+
+    for (const { name, stat: childStat } of childStats) {
+      if (!childStat) { continue; }
+      const childIsDir = childStat.type === "dir";
+      xmlParts.push(`
 <D:response>
   <D:href>${selfHref}${encodeURIComponent(name)}${childIsDir ? "/" : ""}</D:href>
   <D:propstat>
     <D:prop>
       <D:displayname>${xmlEscape(name)}</D:displayname>
-      <D:getcontentlength>${childStat.size || 0}</D:getcontentlength>
+      <D:getcontentlength>${childStat.size ?? 0}</D:getcontentlength>
       <D:resourcetype>${childIsDir ? "<D:collection/>" : ""}</D:resourcetype>
     </D:prop>
     <D:status>HTTP/1.1 200 OK</D:status>
   </D:propstat>
 </D:response>`);
-        }
-      } catch {
-        // If readdir fails, just continue with no children
-      }
     }
     
     xmlParts.push("</D:multistatus>");
@@ -121,7 +144,7 @@ export async function handlePropfind(
       headers: { "Content-Type": "application/xml" }, 
       body: xmlParts.join("") 
     };
-  } catch (error) {
+  } catch {
     if (logger) {
       logger.logList(urlPath, 500);
     }
@@ -146,6 +169,17 @@ export async function handleMkcol(
   }
   
   try {
+    // Check if parent exists (409 Conflict if not)
+    if (parts.length > 1) {
+      const parentExists = await persist.exists(parts.slice(0, -1));
+      if (!parentExists) {
+        if (opts?.logger) {
+          opts.logger.logCreate(urlPath, 409, true);
+        }
+        return { status: 409 }; // Conflict
+      }
+    }
+    
     await persist.ensureDir(parts);
     
     // Call onGenerate callback if provided (for LLM integration)
@@ -157,7 +191,7 @@ export async function handleMkcol(
       opts.logger.logCreate(urlPath, 201, true);
     }
     return { status: 201 };
-  } catch (error) {
+  } catch {
     if (opts?.logger) {
       opts.logger.logCreate(urlPath, 500, true);
     }
@@ -193,13 +227,10 @@ export async function handleGet(
       
       for (const name of children) {
         const childPath = [...parts, name];
-        try {
-          const childStat = await persist.stat(childPath);
-          const isDir = childStat.type === "dir";
-          bodyParts.push(`<li><a href="${encodeURIComponent(name)}${isDir ? "/" : ""}">${name}</a></li>`);
-        } catch {
-          // Skip entries we can't stat
-        }
+      const childStat = await statOrNull(persist, childPath);
+      if (!childStat) { continue; }
+        const isDir = childStat.type === "dir";
+        bodyParts.push(`<li><a href="${encodeURIComponent(name)}${isDir ? "/" : ""}">${name}</a></li>`);
       }
       
       bodyParts.push("</ul></body></html>");
@@ -228,7 +259,7 @@ export async function handleGet(
         body: content 
       };
     }
-  } catch (error) {
+  } catch {
     if (logger) {
       logger.logRead(urlPath, 500);
     }
@@ -268,7 +299,7 @@ export async function handleHead(
         status: 200, 
         headers: { 
           "Content-Type": "application/octet-stream", 
-          "Content-Length": String(stat.size || 0) 
+          "Content-Length": String(stat.size ?? 0) 
         } 
       };
     }
@@ -299,9 +330,7 @@ export async function handlePut(
     }
     
     // Convert string to Uint8Array if needed
-    const data = typeof body === "string" 
-      ? new TextEncoder().encode(body)
-      : body;
+    const data = typeof body === "string" ? new TextEncoder().encode(body) : body;
     
     await persist.writeFile(parts, data, contentType);
     
@@ -313,10 +342,10 @@ export async function handlePut(
       status: 201,
       headers: { 
         "Content-Length": String(data.length), 
-        "Content-Type": contentType || "application/octet-stream" 
+        "Content-Type": contentType ?? "application/octet-stream" 
       },
     };
-  } catch (error) {
+  } catch {
     if (logger) {
       logger.logWrite(urlPath, 500);
     }
@@ -349,7 +378,7 @@ export async function handleDelete(
       logger.logDelete(urlPath, 204);
     }
     return { status: 204 };
-  } catch (error) {
+  } catch {
     if (logger) {
       logger.logDelete(urlPath, 500);
     }
@@ -389,7 +418,7 @@ export async function handleMove(
       logger.logMove(fromPath, destPath, 201);
     }
     return { status: 201 };
-  } catch (error) {
+  } catch {
     if (logger) {
       logger.logMove(fromPath, destPath, 500);
     }
@@ -429,7 +458,7 @@ export async function handleCopy(
       logger.logCopy(fromPath, destPath, 201);
     }
     return { status: 201 };
-  } catch (error) {
+  } catch {
     if (logger) {
       logger.logCopy(fromPath, destPath, 500);
     }
