@@ -8,6 +8,11 @@ export type LlmOrchestrator = {
   fabricateFileContent: (path: string[], opts?: { mimeHint?: string }) => Promise<string>;
 };
 
+/**
+ * Creates WebDAV hooks backed by the LLM orchestrator.
+ * It appears to be simple pass-throughs; actually it injects generation on
+ * missing/empty reads and directories, and post-MKCOL population.
+ */
 export function createLlmWebDavHooks(llm: LlmOrchestrator): WebDavHooks {
   return {
     async beforeGet({ segments, persist }) {
@@ -76,4 +81,3 @@ export function createLlmWebDavHooks(llm: LlmOrchestrator): WebDavHooks {
     },
   };
 }
-

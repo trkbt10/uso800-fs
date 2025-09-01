@@ -8,6 +8,7 @@ import { handleOptions } from "./handlers/options";
 import type { PersistAdapter } from "./persist/types";
 import { createWebDAVLogger, type WebDAVLogger } from "../logging/webdav-logger";
 import { buildIgnoreRegexps, isIgnoredFactory } from "./ignore";
+import { pathToSegments } from "../utils/path-utils";
 import {
   handleHttpGetRequest,
   handlePutRequest,
@@ -57,6 +58,26 @@ export function makeWebdavApp(opts: {
     c.header("DAV", "1,2");
     c.header("MS-Author-Via", "DAV");
     c.header("Allow", "OPTIONS, PROPFIND, MKCOL, GET, HEAD, PUT, DELETE, MOVE, COPY");
+    // Authorization hook (if provided)
+    if (hooks && typeof hooks.authorize === "function") {
+      const headersMap: Record<string, string> = {};
+      for (const [k, v] of c.req.raw.headers) {
+        headersMap[k] = v;
+      }
+      const authRes = await Promise.resolve(
+        hooks.authorize({
+          urlPath: c.req.path,
+          method: c.req.method.toUpperCase(),
+          headers: headersMap,
+          segments: pathToSegments(c.req.path),
+          persist: basePersist,
+          logger,
+        }),
+      ).catch(() => undefined);
+      if (authRes) {
+        return send(c, authRes);
+      }
+    }
     await next();
   });
 
@@ -103,6 +124,10 @@ export function makeWebdavApp(opts: {
 
   app.on("PUT", "/*", async (c) => {
     const p = c.req.path;
+    const ignored = maybeIgnore(c, "PUT");
+    if (ignored) {
+      return ignored;
+    }
     const persist = basePersist;
     const body = await c.req.arrayBuffer();
     const curLock = await davState.getLock(p);
@@ -160,12 +185,16 @@ export function makeWebdavApp(opts: {
     }
 
     if (method === "MKCOL") {
+      if (isIgnored(p)) {
+        logger.logOutput("MKCOL", p, 404);
+        return send(c, { status: 404 });
+      }
       try {
         const bodyText = await c.req.text();
         if (bodyText && bodyText.length > 0) {
           return send(c, { status: 415 });
         }
-      } catch (_e) {
+      } catch {
         // Ignore body read errors intentionally; MKCOL with body is unsupported.
       }
       const persist = basePersist;

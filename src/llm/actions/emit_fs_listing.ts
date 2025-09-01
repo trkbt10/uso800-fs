@@ -75,15 +75,13 @@ export const emit_fs_listing: ToolAction<EmitFsListingAction> = {
     },
   },
   normalize: (params: Record<string, unknown>): EmitFsListingAction | undefined => {
-    let folder = isStringArray(params.folder) ? params.folder : undefined;
-    if (!folder) {
+    const folder = (() => {
+      if (isStringArray(params.folder)) { return params.folder; }
       const p = params.path;
-      if (typeof p === "string") {
-        folder = p.split("/").filter((s) => s.length > 0);
-      } else if (isStringArray(p)) {
-        folder = p;
-      }
-    }
+      if (typeof p === "string") { return p.split("/").filter((s) => s.length > 0); }
+      if (isStringArray(p)) { return p; }
+      return undefined;
+    })();
     const entries = toEntries(params.entries);
     if (!folder) {
       return undefined;

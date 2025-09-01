@@ -36,7 +36,7 @@ export async function handleGetRequest(urlPath: string, options: HandlerOptions)
         }
         const content = await persist.readFile(segments);
         logger?.logRead(urlPath, 200, content.length);
-        return { response: { status: 200, headers: { "Content-Type": "application/octet-stream" }, body: content } };
+        return { response: { status: 200, headers: { "Content-Type": "application/octet-stream", "Accept-Ranges": "bytes", "Content-Length": String(content.length) }, body: content } };
       }
       // Directory listing
       const children = await persist.readdir(segments);
@@ -49,7 +49,7 @@ export async function handleGetRequest(urlPath: string, options: HandlerOptions)
       bodyParts.push("</ul></body></html>");
       const body = bodyParts.join("");
       logger?.logRead(urlPath, 200, body.length);
-      return { response: { status: 200, headers: { "Content-Type": "text/html" }, body } };
+      return { response: { status: 200, headers: { "Content-Type": "text/html", "Accept-Ranges": "bytes" }, body } };
     } catch {
       logger?.logRead(urlPath, 500);
       return { response: { status: 500 } };
@@ -66,11 +66,11 @@ export async function handleGetRequest(urlPath: string, options: HandlerOptions)
     const stat = await persist.stat(segments);
     if (stat.type === "file") {
       const content = await persist.readFile(segments);
-      return { response: { status: 200, headers: { "Content-Type": "application/octet-stream" }, body: content } };
+      return { response: { status: 200, headers: { "Content-Type": "application/octet-stream", "Accept-Ranges": "bytes", "Content-Length": String(content.length) }, body: content } };
     }
     const children = await persist.readdir(segments);
     const body = `<html><body><h1>Index of /${segments.join("/")}</h1><ul>${children.map((n) => `<li><a href="${encodeURIComponent(n)}">${n}</a></li>`).join("")}</ul></body></html>`;
-    return { response: { status: 200, headers: { "Content-Type": "text/html" }, body } };
+    return { response: { status: 200, headers: { "Content-Type": "text/html", "Accept-Ranges": "bytes" }, body } };
   } catch {
     logger?.logRead(urlPath, 404);
     return { response: { status: 404 } };

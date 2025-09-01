@@ -12,7 +12,6 @@ export type Tracker = {
 export function createConsoleTracker(prefix = "[TRACK]"): Tracker {
   return {
     track(channel, payload) {
-      // eslint-disable-next-line no-console
       console.log(`${prefix} ${channel} ${JSON.stringify(payload)}`);
     },
   };

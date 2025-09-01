@@ -1,7 +1,7 @@
 /**
  * @file Unit tests for LLM orchestrator with PersistAdapter
  */
-import { createUsoFsLLMInstance } from "./fs-llm";
+import { createUsoFsLLMInstance, type OpenAIResponsesClient } from "./fs-llm";
 import { createMemoryAdapter } from "../webdav/persist/memory";
 import type { Responses } from "openai/resources/responses/responses";
 
@@ -91,7 +91,7 @@ describe("fs-llm with PersistAdapter", () => {
         yield added; yield delta; yield done; yield finished;
       })();
 
-      const mockClient = { responses: { stream: async () => mockStream } };
+      const mockClient: OpenAIResponsesClient = { responses: { stream: async () => mockStream } };
 
       const instance = createUsoFsLLMInstance(mockClient, { 
         model: "test", 
@@ -154,7 +154,7 @@ describe("fs-llm with PersistAdapter", () => {
         yield added; yield delta; yield done; yield finished;
       })();
 
-      const mockClient = { responses: { stream: async () => mockStream } };
+      const mockClient: OpenAIResponsesClient = { responses: { stream: async () => mockStream } };
 
       const instance = createUsoFsLLMInstance(mockClient, { 
         model: "test", 
@@ -178,7 +178,7 @@ describe("fs-llm with PersistAdapter", () => {
 
       const mockClient = { responses: { stream: async () => mockStream } };
 
-      const instance = createUsoFsLLMInstance(mockClient as any, { 
+      const instance = createUsoFsLLMInstance(mockClient, { 
         model: "test", 
         persist 
       });

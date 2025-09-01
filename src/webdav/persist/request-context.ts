@@ -136,13 +136,10 @@ export function createRequestContext(base: PersistAdapter): PersistAdapter {
 /**
  * Factory to create request-scoped PersistAdapter instances.
  */
-export class RequestContextFactory {
-  constructor(private base: PersistAdapter) {}
-
-  /**
-   * Creates a new PersistAdapter with isolated DataLoader context for a single request.
-   */
-  createContext(): PersistAdapter {
-    return createRequestContext(this.base);
-  }
+export function createRequestContextFactory(base: PersistAdapter): { createContext: () => PersistAdapter } {
+  return {
+    createContext(): PersistAdapter {
+      return createRequestContext(base);
+    },
+  };
 }

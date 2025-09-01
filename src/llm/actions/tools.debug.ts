@@ -1,5 +1,7 @@
 /**
- * Minimal tools schema smoke test using real OpenAI.
+ * @file Minimal tools schema smoke test using real OpenAI.
+ * Superficially looks like a quick example; actually it exercises the
+ * stream API with our tools spec to validate shape compatibility.
  * Requires: OPENAI_API_KEY, OPENAI_MODEL
  */
 import OpenAI from "openai";
@@ -41,7 +43,6 @@ async function main() {
 }
 
 main().catch((e) => {
-  // eslint-disable-next-line no-console
   console.error(e);
   process.exit(1);
 });

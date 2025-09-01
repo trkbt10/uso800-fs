@@ -9,7 +9,6 @@ import type OpenAI from "openai";
 import type { ResponseStreamParams } from "openai/lib/responses/ResponseStream";
 import type { Responses } from "openai/resources/responses/responses";
 import { buildListingPrompt, buildFileContentPrompt } from "./utils/prompt-builder";
-import { segmentsToDisplayPath } from "./utils/path-utils";
 
 const allTools = () => getOpenAIToolsSpec();
 function selectTools(names: string[]): ToolSpec[] {
@@ -34,7 +33,7 @@ function ensureAsyncIterable<T>(x: AsyncIterable<T> | Iterable<T>): AsyncIterabl
 /**
  * Minimal OpenAI client interface for Responses API.
  */
-type OpenAIResponsesClient = {
+export type OpenAIResponsesClient = {
   responses: {
     stream: (
       body: ResponseStreamParams,
@@ -47,7 +46,7 @@ function keyOf(parts: string[]): string {
   if (!Array.isArray(parts)) {
     return "/";
   }
-  return "/" + parts.filter((p) => p && p !== "/").join("/");
+  return "/" + parts.filter((p) => p !== "" && p !== "/").join("/");
 }
 
 /**
@@ -65,16 +64,6 @@ export function createUsoFsLLMInstance(
   if (!args || !args.model || !args.persist) {
     throw new Error("model and persist are required");
   }
-
-  // Per-invocation stats (reset inside each public method)
-  let listingStats: { dirs: number; files: number; bytes: number; dirNames: string[]; fileNames: string[] } = {
-    dirs: 0,
-    files: 0,
-    bytes: 0,
-    dirNames: [],
-    fileNames: [],
-  };
-  let fileStats: { files: number; bytes: number; fileName?: string } = { files: 0, bytes: 0 };
 
   // In-flight coalescing to avoid duplicate LLM runs for the same target
   const inflight = {
@@ -96,52 +85,18 @@ export function createUsoFsLLMInstance(
   }
 
   /**
-   * Applies a tool invocation to the filesystem via PersistAdapter.
-   */
-  async function applyTool(name: string, params: Record<string, unknown>) {
-    const action = normalizeAction(name, params);
-    if (!action) {
-      return undefined;
-    }
-    if (action.type === "emit_fs_listing") {
-      const { folder, entries } = action.params as { folder: string[]; entries: Array<{ kind: "dir" | "file"; name: string; content: string; mime: string }> };
-      await args.persist.ensureDir(folder);
-      for (const e of entries) {
-        if (e.kind === "dir") {
-          await args.persist.ensureDir([...folder, e.name]);
-          listingStats.dirs += 1;
-          listingStats.dirNames.push(e.name);
-        } else {
-          await args.persist.ensureDir([...folder]);
-          const data = new TextEncoder().encode(e.content);
-          await args.persist.writeFile([...folder, e.name], data, e.mime);
-          listingStats.files += 1;
-          listingStats.bytes += data.length;
-          listingStats.fileNames.push(e.name);
-        }
-      }
-      return undefined;
-    }
-    if (action.type === "emit_file_content") {
-      const { path, content, mime } = action.params as { path: string[]; content: string; mime: string };
-      await args.persist.ensureDir(path.slice(0, -1));
-      const data = new TextEncoder().encode(content);
-      await args.persist.writeFile(path, data, mime);
-      fileStats.files += 1;
-      fileStats.bytes += data.length;
-      fileStats.fileName = path[path.length - 1];
-      return content;
-    }
-    
-    return undefined;
-  }
-
-  /**
    * Requests a fabricated listing under the specified folder using LLM tool-calls.
    */
   async function fabricateListing(folderPath: string[], options?: { depth?: string | null }): Promise<void> {
     const key = `LISTING:${keyOf(folderPath)}:DEPTH:${options?.depth ?? "null"}`;
     return withCoalescing(inflight.listing, key, async () => {
+    const listingStats: { dirs: number; files: number; bytes: number; dirNames: string[]; fileNames: string[] } = {
+      dirs: 0,
+      files: 0,
+      bytes: 0,
+      dirNames: [],
+      fileNames: [],
+    };
     // Use the tested prompt builder
     const promptResult = buildListingPrompt(folderPath, {
       depth: options?.depth,
@@ -156,8 +111,7 @@ export function createUsoFsLLMInstance(
       tools: selectTools(["emit_fs_listing"]),
       tool_choice: { type: "function", name: "emit_fs_listing" },
     };
-    // Reset stats and log LLM start
-    listingStats = { dirs: 0, files: 0, bytes: 0, dirNames: [], fileNames: [] };
+    // Log LLM start
     {
       const displayPath = promptResult.displayPath;
       const promptPreview = prompt.slice(0, 200);
@@ -169,10 +123,29 @@ export function createUsoFsLLMInstance(
     await runToolCallStreaming<void>(
       ensureAsyncIterable(stream),
       ({ name, params }) => {
-        if (!name) {
+        if (!name) { return undefined; }
+        const action = normalizeAction(name, params);
+        if (!action) { return undefined; }
+        if (action.type !== "emit_fs_listing") { return undefined; }
+        const { folder, entries } = action.params as { folder: string[]; entries: Array<{ kind: "dir" | "file"; name: string; content: string; mime: string }> };
+        return (async () => {
+          await args.persist.ensureDir(folder);
+          for (const e of entries) {
+            if (e.kind === "dir") {
+              await args.persist.ensureDir([...folder, e.name]);
+              listingStats.dirs += 1;
+              listingStats.dirNames.push(e.name);
+            } else {
+              await args.persist.ensureDir([...folder]);
+              const data = new TextEncoder().encode(e.content);
+              await args.persist.writeFile([...folder, e.name], data, e.mime);
+              listingStats.files += 1;
+              listingStats.bytes += data.length;
+              listingStats.fileNames.push(e.name);
+            }
+          }
           return undefined;
-        }
-        return applyTool(name, params);
+        })();
       },
       { endAfterFirst: true },
     );
@@ -191,6 +164,7 @@ export function createUsoFsLLMInstance(
   async function fabricateFileContent(pathParts: string[], options?: { mimeHint?: string }): Promise<string> {
     const key = `FILE:${keyOf(pathParts)}:MIME:${options?.mimeHint ?? ""}`;
     return withCoalescing(inflight.file, key, async () => {
+    const fileStats: { files: number; bytes: number; fileName?: string } = { files: 0, bytes: 0 };
     // Use the tested prompt builder
     const promptResult = buildFileContentPrompt(pathParts, {
       mimeHint: options?.mimeHint,
@@ -205,8 +179,7 @@ export function createUsoFsLLMInstance(
       tools: selectTools(["emit_file_content"]),
       tool_choice: { type: "function", name: "emit_file_content" },
     };
-    // Reset stats and log LLM start
-    fileStats = { files: 0, bytes: 0, fileName: undefined };
+    // Log LLM start
     {
       const displayPath = promptResult.displayPath;
       const promptPreview = prompt.slice(0, 200);
@@ -218,10 +191,20 @@ export function createUsoFsLLMInstance(
     const res = await runToolCallStreaming<string>(
       ensureAsyncIterable(stream),
       ({ name, params }) => {
-        if (!name) {
-          return undefined;
-        }
-        return applyTool(name, params);
+        if (!name) { return undefined; }
+        const action = normalizeAction(name, params);
+        if (!action) { return undefined; }
+        if (action.type !== "emit_file_content") { return undefined; }
+        const { path, content, mime } = action.params as { path: string[]; content: string; mime: string };
+        return (async () => {
+          await args.persist.ensureDir(path.slice(0, -1));
+          const data = new TextEncoder().encode(content);
+          await args.persist.writeFile(path, data, mime);
+          fileStats.files += 1;
+          fileStats.bytes += data.length;
+          fileStats.fileName = path[path.length - 1];
+          return content;
+        })();
       },
       { endAfterFirst: true },
     );

@@ -25,11 +25,23 @@ export type WebDavPutContext = WebDavCommonContext & {
 export type WebDavMkcolContext = WebDavCommonContext & {};
 
 /**
+ * Authentication/authorization context. Called before routing a request.
+ * If a hook returns a DavResponse (e.g., 401/403), the request is short-circuited.
+ */
+export type WebDavAuthContext = WebDavCommonContext & {
+  method: string;
+  headers: Record<string, string>;
+};
+
+/**
  * WebDAV operation hooks. All are optional.
  * If a hook returns a DavResponse, the handler may short-circuit with it.
  * If a hook returns void, the handler proceeds normally.
  */
 export type WebDavHooks = {
+  // Authorization (runs before any handler)
+  authorize?(ctx: WebDavAuthContext): Promise<DavResponse | void> | DavResponse | void;
+
   // GET
   beforeGet?(ctx: WebDavGetContext): Promise<DavResponse | void> | DavResponse | void;
   afterGet?(ctx: WebDavGetContext, res: DavResponse): Promise<DavResponse | void> | DavResponse | void;

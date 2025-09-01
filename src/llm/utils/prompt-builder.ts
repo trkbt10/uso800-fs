@@ -102,7 +102,7 @@ export type FileContentPromptResult = {
  */
 export function buildFileContentStyleHints(segments: string[]): string[] {
   const hints: string[] = [];
-  const filename = segments[segments.length - 1] || "";
+  const filename = segments.length > 0 ? segments[segments.length - 1] : "";
   const ext = filename.split(".").pop()?.toLowerCase();
   
   switch (ext) {

@@ -26,19 +26,12 @@ export function createMemoryAdapter(): PersistAdapter {
     if (!Array.isArray(parts) || parts.length === 0) {
       return root;
     }
-    
-    let current = root;
-    for (const part of parts) {
-      if (!part || current.type !== "dir" || !current.children) {
+    return parts.reduce<MemoryEntry | undefined>((node, part) => {
+      if (!node || node.type !== "dir" || !node.children || !part) {
         return undefined;
       }
-      const next = current.children.get(part);
-      if (!next) {
-        return undefined;
-      }
-      current = next;
-    }
-    return current;
+      return node.children.get(part);
+    }, root as MemoryEntry | undefined);
   }
 
   function getParentAndName(parts: PathParts): { parent: MemoryEntry; name: string } | undefined {
@@ -66,28 +59,29 @@ export function createMemoryAdapter(): PersistAdapter {
       if (!Array.isArray(path) || path.length === 0) {
         return; // Root already exists
       }
-
-      let current = root;
-      for (const part of path) {
-        if (!part) continue;
-        
-        if (!current.children) {
-          current.children = new Map();
+      function ensureFrom(node: MemoryEntry, segments: readonly string[]): MemoryEntry {
+        if (segments.length === 0) {
+          return node;
         }
-        
-        let next = current.children.get(part);
-        if (!next) {
-          next = {
-            type: "dir",
-            mtime: new Date().toISOString(),
-            children: new Map(),
-          };
-          current.children.set(part, next);
-        } else if (next.type !== "dir") {
-          throw new Error(`Path component is not a directory: ${part}`);
+        const [head, ...tail] = segments;
+        if (!head) {
+          return ensureFrom(node, tail);
         }
-        current = next;
+        if (!node.children) {
+          node.children = new Map();
+        }
+        const existing = node.children.get(head);
+        if (!existing) {
+          const next: MemoryEntry = { type: "dir", mtime: new Date().toISOString(), children: new Map() };
+          node.children.set(head, next);
+          return ensureFrom(next, tail);
+        }
+        if (existing.type !== "dir") {
+          throw new Error(`Path component is not a directory: ${head}`);
+        }
+        return ensureFrom(existing, tail);
       }
+      ensureFrom(root, path as string[]);
     },
 
     async readdir(path: PathParts): Promise<string[]> {
@@ -125,7 +119,7 @@ export function createMemoryAdapter(): PersistAdapter {
       if (entry.type !== "file") {
         throw new Error(`Not a file: /${path.join("/")}`);
       }
-      return entry.content || new Uint8Array();
+      return entry.content !== undefined ? entry.content : new Uint8Array();
     },
 
     async writeFile(path: PathParts, data: Uint8Array, mime?: string): Promise<void> {
@@ -163,8 +157,12 @@ export function createMemoryAdapter(): PersistAdapter {
         return;
       }
       
-      if (entry.type === "dir" && entry.children && entry.children.size > 0 && !opts?.recursive) {
-        throw new Error(`Directory not empty: /${path.join("/")}`);
+      if (entry.type === "dir") {
+        const hasChildren = entry.children ? entry.children.size > 0 : false;
+        const allowRecursive = opts ? Boolean(opts.recursive) : false;
+        if (hasChildren && !allowRecursive) {
+          throw new Error(`Directory not empty: /${path.join("/")}`);
+        }
       }
       
       parent.children.delete(name);

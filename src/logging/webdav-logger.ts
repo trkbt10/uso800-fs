@@ -29,6 +29,9 @@ export type WebDAVLogger = {
 import type { Tracker } from "./tracker";
 import { createConsoleTracker } from "./tracker";
 
+/**
+ * Factory for a WebDAVLogger that emits structured events to a Tracker sink.
+ */
 export function createWebDAVLogger(tracker?: Tracker): WebDAVLogger {
   const sink: Tracker = tracker ?? createConsoleTracker("[WebDAV]");
 
@@ -66,26 +69,26 @@ export function createWebDAVLogger(tracker?: Tracker): WebDAVLogger {
     },
 
     logRead(path: string, status: number, size?: number): void {
-      const entry = { operation: "READ", path, status, size } as const;
-      log("OUT", `READ ${path}`, entry as unknown as Record<string, unknown>);
+      const entry: Record<string, unknown> = { operation: "READ", path, status, size };
+      log("OUT", `READ ${path}`, entry);
       sink.track("fs.read", entry);
     },
 
     logWrite(path: string, status: number, size?: number): void {
-      const entry = { operation: "WRITE", path, status, size } as const;
-      log("OUT", `WRITE ${path}`, entry as unknown as Record<string, unknown>);
+      const entry: Record<string, unknown> = { operation: "WRITE", path, status, size };
+      log("OUT", `WRITE ${path}`, entry);
       sink.track("fs.write", entry);
     },
 
     logList(path: string, status: number, itemCount?: number): void {
-      const entry = { operation: "LIST", path, status, itemCount } as const;
-      log("OUT", `LIST ${path}`, entry as unknown as Record<string, unknown>);
+      const entry: Record<string, unknown> = { operation: "LIST", path, status, itemCount };
+      log("OUT", `LIST ${path}`, entry);
       sink.track("fs.list", entry);
     },
 
     logCreate(path: string, status: number, isDir: boolean): void {
-      const entry = { operation: "CREATE", path, status, type: isDir ? "directory" : "file" } as const;
-      log("OUT", `CREATE ${path}`, entry as unknown as Record<string, unknown>);
+      const entry: Record<string, unknown> = { operation: "CREATE", path, status, type: isDir ? "directory" : "file" };
+      log("OUT", `CREATE ${path}`, entry);
       sink.track("fs.create", entry);
     },
 

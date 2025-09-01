@@ -24,7 +24,7 @@ export function toEntries(
   for (const item of value) {
     if (item && typeof item === "object") {
       const rec = item as Record<string, unknown>;
-      const kind = (rec["kind"] ?? rec["type"]) as unknown;
+      const kind = rec["kind"] ?? rec["type"];
       const name = rec["name"];
       if ((kind === "dir" || kind === "file") && typeof name === "string") {
         const contentVal = rec["content"];
