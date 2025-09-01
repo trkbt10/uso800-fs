@@ -22,13 +22,11 @@ function forbidden(): DavResponse {
 export function createBasicAuthHooks(user: string, pass: string, realm = "WebDAV"): WebDavHooks {
   const expected = Buffer.from(`${user}:${pass}`).toString("base64");
   return {
-    async authorize({ headers }) {
-      const auth = headers["authorization"] ?? headers["Authorization"];
-      if (!auth || !auth.startsWith("Basic ")) {
+    async authorize({ authorization }) {
+      if (!authorization || authorization.scheme !== "Basic") {
         return unauthorizedWWWBasic(realm);
       }
-      const token = auth.slice("Basic ".length).trim();
-      if (token !== expected) {
+      if (authorization.token !== expected) {
         return unauthorizedWWWBasic(realm);
       }
       return undefined;
@@ -42,17 +40,14 @@ export function createBasicAuthHooks(user: string, pass: string, realm = "WebDAV
  */
 export function createBearerAuthHooks(token: string): WebDavHooks {
   return {
-    async authorize({ headers }) {
-      const auth = headers["authorization"] ?? headers["Authorization"];
-      if (!auth || !auth.startsWith("Bearer ")) {
+    async authorize({ authorization }) {
+      if (!authorization || authorization.scheme !== "Bearer") {
         return { status: 401 };
       }
-      const got = auth.slice("Bearer ".length).trim();
-      if (got !== token) {
+      if (authorization.token !== token) {
         return forbidden();
       }
       return undefined;
     },
   };
 }
-

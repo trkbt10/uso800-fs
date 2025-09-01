@@ -7,6 +7,7 @@
 import type { PersistAdapter } from "./persist/types";
 import type { WebDAVLogger } from "../logging/webdav-logger";
 import type { DavResponse } from "./handlers/types";
+import type { ParsedAuthorization } from "./auth/types";
 
 export type WebDavCommonContext = {
   urlPath: string;
@@ -31,6 +32,10 @@ export type WebDavMkcolContext = WebDavCommonContext & {};
 export type WebDavAuthContext = WebDavCommonContext & {
   method: string;
   headers: Record<string, string>;
+  /** Raw Authorization header (if any). */
+  authorizationRaw?: string;
+  /** Parsed Authorization header (Basic/Bearer/Digest/Other). */
+  authorization?: ParsedAuthorization;
 };
 
 /**
@@ -38,23 +43,31 @@ export type WebDavAuthContext = WebDavCommonContext & {
  * If a hook returns a DavResponse, the handler may short-circuit with it.
  * If a hook returns void, the handler proceeds normally.
  */
+/**
+ * Shared hook type utilities to avoid repetitive unions.
+ */
+export type HookResult = DavResponse | void;
+export type MaybePromise<T> = T | Promise<T>;
+export type Hook<Ctx> = (ctx: Ctx) => MaybePromise<HookResult>;
+export type AfterHook<Ctx> = (ctx: Ctx, res: DavResponse) => MaybePromise<HookResult>;
+
 export type WebDavHooks = {
   // Authorization (runs before any handler)
-  authorize?(ctx: WebDavAuthContext): Promise<DavResponse | void> | DavResponse | void;
+  authorize?: Hook<WebDavAuthContext>;
 
   // GET
-  beforeGet?(ctx: WebDavGetContext): Promise<DavResponse | void> | DavResponse | void;
-  afterGet?(ctx: WebDavGetContext, res: DavResponse): Promise<DavResponse | void> | DavResponse | void;
+  beforeGet?: Hook<WebDavGetContext>;
+  afterGet?: AfterHook<WebDavGetContext>;
 
   // PROPFIND
-  beforePropfind?(ctx: WebDavPropfindContext): Promise<DavResponse | void> | DavResponse | void;
-  afterPropfind?(ctx: WebDavPropfindContext, res: DavResponse): Promise<DavResponse | void> | DavResponse | void;
+  beforePropfind?: Hook<WebDavPropfindContext>;
+  afterPropfind?: AfterHook<WebDavPropfindContext>;
 
   // PUT (can mutate body via setBody)
-  beforePut?(ctx: WebDavPutContext): Promise<DavResponse | void> | DavResponse | void;
-  afterPut?(ctx: WebDavPutContext, res: DavResponse): Promise<DavResponse | void> | DavResponse | void;
+  beforePut?: Hook<WebDavPutContext>;
+  afterPut?: AfterHook<WebDavPutContext>;
 
   // MKCOL
-  beforeMkcol?(ctx: WebDavMkcolContext): Promise<DavResponse | void> | DavResponse | void;
-  afterMkcol?(ctx: WebDavMkcolContext, res: DavResponse): Promise<DavResponse | void> | DavResponse | void;
+  beforeMkcol?: Hook<WebDavMkcolContext>;
+  afterMkcol?: AfterHook<WebDavMkcolContext>;
 };

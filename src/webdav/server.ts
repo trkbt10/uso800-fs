@@ -9,6 +9,7 @@ import type { PersistAdapter } from "./persist/types";
 import { createWebDAVLogger, type WebDAVLogger } from "../logging/webdav-logger";
 import { buildIgnoreRegexps, isIgnoredFactory } from "./ignore";
 import { pathToSegments } from "../utils/path-utils";
+import { parseAuthorizationHeader } from "./auth/types";
 import {
   handleHttpGetRequest,
   handlePutRequest,
@@ -64,11 +65,15 @@ export function makeWebdavApp(opts: {
       for (const [k, v] of c.req.raw.headers) {
         headersMap[k] = v;
       }
+      const authorizationRaw = c.req.header("Authorization");
+      const parsed = parseAuthorizationHeader(authorizationRaw ?? undefined);
       const authRes = await Promise.resolve(
         hooks.authorize({
           urlPath: c.req.path,
           method: c.req.method.toUpperCase(),
           headers: headersMap,
+          authorizationRaw,
+          authorization: parsed,
           segments: pathToSegments(c.req.path),
           persist: basePersist,
           logger,
