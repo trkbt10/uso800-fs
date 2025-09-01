@@ -21,7 +21,8 @@ export async function handleHeadRequest(urlPath: string, options: HandlerOptions
       return { response: { status: 200, headers: { "Content-Type": "text/html", "Accept-Ranges": "bytes" } } };
     }
     const etag = `W/"${String(stat.size ?? 0)}-${stat.mtime ?? ""}"`;
-    return { response: { status: 200, headers: { "Content-Type": "application/octet-stream", "Content-Length": String(stat.size ?? 0), "Accept-Ranges": "bytes", ...(stat.mtime ? { "Last-Modified": stat.mtime } : {}), ...(etag ? { ETag: etag } : {}) } } };
+    const contentType = stat.mime ?? "application/octet-stream";
+    return { response: { status: 200, headers: { "Content-Type": contentType, "Content-Length": String(stat.size ?? 0), "Accept-Ranges": "bytes", ...(stat.mtime ? { "Last-Modified": stat.mtime } : {}), ...(etag ? { ETag: etag } : {}) } } };
   } catch {
     return { response: { status: 500 } };
   }

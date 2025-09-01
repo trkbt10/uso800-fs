@@ -80,4 +80,36 @@ describe("PROPFIND handler", () => {
     const contents = await persist.readdir([]);
     expect(contents).not.toContain("root");
   });
+
+  it("supports allprop and includes getlastmodified/getetag", async () => {
+    const persist = createMemoryAdapter();
+    const logger = createLogger();
+    await persist.writeFile(["afile.txt"], new TextEncoder().encode("x"), "text/plain");
+    const body = `<?xml version="1.0"?><D:propfind xmlns:D="DAV:"><D:allprop/></D:propfind>`;
+    const result = await handlePropfindRequest("/afile.txt", "0", { persist, logger }, body);
+    const xml = String(result.response.body ?? "");
+    expect(xml).toContain("<D:getlastmodified>");
+    expect(xml).toContain("<D:getetag>");
+  });
+
+  it("supports propname and returns names only", async () => {
+    const persist = createMemoryAdapter();
+    const logger = createLogger();
+    await persist.writeFile(["b.txt"], new TextEncoder().encode("x"), "text/plain");
+    const body = `<?xml version="1.0"?><D:propfind xmlns:D="DAV:"><D:propname/></D:propfind>`;
+    const result = await handlePropfindRequest("/b.txt", "0", { persist, logger }, body);
+    const xml = String(result.response.body ?? "");
+    expect(xml).toContain("<D:displayname/>");
+    expect(xml).toContain("<D:getcontentlength/>");
+  });
+
+  it("supports prop selection for getcontentlength only", async () => {
+    const persist = createMemoryAdapter();
+    const logger = createLogger();
+    await persist.writeFile(["c.txt"], new TextEncoder().encode("xxx"), "text/plain");
+    const body = `<?xml version="1.0"?><D:propfind xmlns:D="DAV:"><D:prop><D:getcontentlength/></D:prop></D:propfind>`;
+    const result = await handlePropfindRequest("/c.txt", "0", { persist, logger }, body);
+    const xml = String(result.response.body ?? "");
+    expect(xml).toContain("<D:getcontentlength>3</D:getcontentlength>");
+  });
 });

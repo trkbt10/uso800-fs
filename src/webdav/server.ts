@@ -25,6 +25,9 @@ import {
 } from "./";
 import type { WebDavHooks } from "./hooks";
 import { createDavStateStore } from "./dav-state";
+import { checkDepthInfinityRequiredForDir, etagMatchesIfHeader, requireLockOk } from "./http-guards";
+import { maybeIgnored } from "./ignore-guards";
+import { toResponse } from "./response";
 
 /**
  * Creates a Hono-based WebDAV app using the provided PersistAdapter.
@@ -47,13 +50,8 @@ export function makeWebdavApp(opts: {
   const isIgnored = isIgnoredFactory(ignoreRes);
   const davState = createDavStateStore(basePersist);
 
-  function send(c: Context, res: DavResponse) {
-    const status = res.status;
-    const init: ResponseInit = { status, headers: res.headers };
-    const noBody = status === 204 || status === 304;
-    const body = noBody ? undefined : (res.body as BodyInit | undefined);
-    return new Response(body, init);
-  }
+  // guard helpers are imported; use converter for responses
+  function send(_c: Context, res: DavResponse) { return toResponse(res); }
 
   app.all("*", async (c, next) => {
     c.header("DAV", "1,2");
@@ -93,11 +91,8 @@ export function makeWebdavApp(opts: {
 
   function maybeIgnore(c: Context, method: string): Response | null {
     const p = c.req.path;
-    logger.logInput(method, p);
-    if (isIgnored(p)) {
-      logger.logOutput(method, p, 404);
-      return send(c, { status: 404 });
-    }
+    const res = maybeIgnored(method, p, isIgnored, logger);
+    if (res) { return send(c, res); }
     return null;
   }
 
@@ -134,14 +129,16 @@ export function makeWebdavApp(opts: {
       return ignored;
     }
     const persist = basePersist;
-    const body = await c.req.arrayBuffer();
-    const curLock = await davState.getLock(p);
-    if (curLock) {
-      const provided = c.req.header("Lock-Token");
-      if (!provided || provided !== curLock.token) {
-        return send(c, { status: 423 });
-      }
+    // Partial writes via Content-Range not implemented (explicit 501)
+    const contentRange = c.req.header("Content-Range");
+    if (contentRange && contentRange.trim().length > 0) {
+      return send(c, { status: 501, headers: { "Accept-Ranges": "bytes" } });
     }
+    const body = await c.req.arrayBuffer();
+    const ok = await requireLockOk(davState, p, c.req.raw.headers, "Lock-Token");
+    if (!ok) { return send(c, { status: 423 }); }
+    const etagOk = await etagMatchesIfHeader(basePersist, p, c.req.raw.headers);
+    if (!etagOk) { return send(c, { status: 412 }); }
     const result = await handlePutRequest(p, body, { persist, hooks, logger });
     return send(c, result.response);
   });
@@ -150,13 +147,10 @@ export function makeWebdavApp(opts: {
     logger.logInput("DELETE", c.req.path);
     const p = c.req.path;
     const persist = basePersist;
-    const curLock = await davState.getLock(p);
-    if (curLock) {
-      const provided = c.req.header("Lock-Token");
-      if (!provided || provided !== curLock.token) {
-        return send(c, { status: 423 });
-      }
-    }
+    const ok = await requireLockOk(davState, p, c.req.raw.headers, "Lock-Token");
+    if (!ok) { return send(c, { status: 423 }); }
+    const etagOk = await etagMatchesIfHeader(basePersist, p, c.req.raw.headers);
+    if (!etagOk) { return send(c, { status: 412 }); }
     const result = await handleDeleteRequest(p, { persist, logger });
     return send(c, result.response);
   });
@@ -172,6 +166,7 @@ export function makeWebdavApp(opts: {
         return send(c, { status: 404 });
       }
       const persist = basePersist;
+      const bodyText: string | null = await c.req.text().then((t) => t).catch(() => null);
       const result = await handlePropfindRequest(p, depth, {
         persist,
         hooks,
@@ -185,7 +180,7 @@ export function makeWebdavApp(opts: {
           }
           return false;
         },
-      });
+      }, bodyText);
       return send(c, result.response);
     }
 
@@ -221,6 +216,10 @@ export function makeWebdavApp(opts: {
 
     if (method === "PROPPATCH") {
       const body = await c.req.text();
+      const ok = await requireLockOk(davState, p, c.req.raw.headers, "Lock-Token");
+      if (!ok) { return send(c, { status: 423 }); }
+      const etagOk = await etagMatchesIfHeader(basePersist, p, c.req.raw.headers);
+      if (!etagOk) { return send(c, { status: 412 }); }
       const result = await handleProppatchRequest(p, body, { persist: basePersist, logger });
       return send(c, result.response);
     }
@@ -233,6 +232,15 @@ export function makeWebdavApp(opts: {
       const overwrite = (c.req.header("Overwrite") ?? "T").toUpperCase() !== "F";
       const persist = basePersist;
       const destUrl = new URL(destination);
+      const okDepth = await checkDepthInfinityRequiredForDir(persist, p, () => c.req.header("Depth"));
+      if (!okDepth) { return send(c, { status: 400 }); }
+      // Lock enforcement for source and destination
+      const srcOk = await requireLockOk(davState, p, c.req.raw.headers, "Lock-Token");
+      const dstOk = await requireLockOk(davState, destUrl.pathname, c.req.raw.headers, "Lock-Token");
+      if (!srcOk || !dstOk) { return send(c, { status: 423 }); }
+      // ETag precondition (If) for source
+      const etagOk = await etagMatchesIfHeader(basePersist, p, c.req.raw.headers);
+      if (!etagOk) { return send(c, { status: 412 }); }
       const result = await handleMoveRequest(p, destUrl.pathname, { persist, logger, overwrite });
       return send(c, result.response);
     }
@@ -245,6 +253,15 @@ export function makeWebdavApp(opts: {
       const overwrite = (c.req.header("Overwrite") ?? "T").toUpperCase() !== "F";
       const persist = basePersist;
       const destUrl = new URL(destination);
+      const okDepthCopy = await checkDepthInfinityRequiredForDir(persist, p, () => c.req.header("Depth"));
+      if (!okDepthCopy) { return send(c, { status: 400 }); }
+      // Lock enforcement for source and destination
+      const srcOk = await requireLockOk(davState, p, c.req.raw.headers, "Lock-Token");
+      const dstOk = await requireLockOk(davState, destUrl.pathname, c.req.raw.headers, "Lock-Token");
+      if (!srcOk || !dstOk) { return send(c, { status: 423 }); }
+      // ETag precondition (If) for source
+      const etagOk = await etagMatchesIfHeader(basePersist, p, c.req.raw.headers);
+      if (!etagOk) { return send(c, { status: 412 }); }
       const result = await handleCopyRequest(p, destUrl.pathname, { persist, logger, overwrite });
       return send(c, result.response);
     }

@@ -36,7 +36,9 @@ export async function handleGetRequest(urlPath: string, options: HandlerOptions)
         }
         const content = await persist.readFile(segments);
         logger?.logRead(urlPath, 200, content.length);
-        return { response: { status: 200, headers: { "Content-Type": "application/octet-stream", "Accept-Ranges": "bytes", "Content-Length": String(content.length) }, body: content } };
+        const etag = `W/"${String(stat.size ?? 0)}-${stat.mtime ?? ""}"`;
+        const contentType = stat.mime ?? "application/octet-stream";
+        return { response: { status: 200, headers: { "Content-Type": contentType, "Accept-Ranges": "bytes", "Content-Length": String(content.length), ...(stat.mtime ? { "Last-Modified": stat.mtime } : {}), ...(etag ? { ETag: etag } : {}) }, body: content } };
       }
       // Directory listing
       const children = await persist.readdir(segments);
@@ -66,7 +68,9 @@ export async function handleGetRequest(urlPath: string, options: HandlerOptions)
     const stat = await persist.stat(segments);
     if (stat.type === "file") {
       const content = await persist.readFile(segments);
-      return { response: { status: 200, headers: { "Content-Type": "application/octet-stream", "Accept-Ranges": "bytes", "Content-Length": String(content.length) }, body: content } };
+      const etag = `W/"${String(stat.size ?? 0)}-${stat.mtime ?? ""}"`;
+      const contentType = stat.mime ?? "application/octet-stream";
+      return { response: { status: 200, headers: { "Content-Type": contentType, "Accept-Ranges": "bytes", "Content-Length": String(content.length), ...(stat.mtime ? { "Last-Modified": stat.mtime } : {}), ...(etag ? { ETag: etag } : {}) }, body: content } };
     }
     const children = await persist.readdir(segments);
     const body = `<html><body><h1>Index of /${segments.join("/")}</h1><ul>${children.map((n) => `<li><a href="${encodeURIComponent(n)}">${n}</a></li>`).join("")}</ul></body></html>`;

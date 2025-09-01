@@ -66,14 +66,11 @@ export function parseAuthorizationHeader(raw: string | undefined): ParsedAuthori
     const params: Record<string, string> = {};
     const input = rest.trim();
     const re = /([a-zA-Z0-9_]+)=((?:"[^"]*")|[^,]*)/g;
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(input)) !== null) {
+    for (const m of input.matchAll(re)) {
       const k = m[1];
-      let v = m[2]?.trim() ?? "";
-      if (v.startsWith('"') && v.endsWith('"')) {
-        v = v.slice(1, -1);
-      }
-      params[k] = v;
+      const raw = (m[2]?.trim() ?? "");
+      const val = raw.startsWith('"') && raw.endsWith('"') ? raw.slice(1, -1) : raw;
+      params[k] = val;
     }
     const digest: DigestAuthHeader = {
       scheme: "Digest",
@@ -93,4 +90,3 @@ export function parseAuthorizationHeader(raw: string | undefined): ParsedAuthori
   }
   return { scheme: "Other", value: rest.trim() };
 }
-

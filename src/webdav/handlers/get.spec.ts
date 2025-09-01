@@ -2,6 +2,7 @@
  * @file Unit tests for GET handler (co-located)
  */
 import { handleGetRequest } from "./get";
+import { handleHeadRequest } from "./head";
 import { createMemoryAdapter } from "../persist/memory";
 import type { WebDAVLogger } from "../../logging/webdav-logger";
 import type { WebDavHooks } from "../hooks";
@@ -65,6 +66,23 @@ describe("GET handler", () => {
     expect(result.response.status).toBe(200);
     const body = result.response.body as Uint8Array;
     expect(new TextDecoder().decode(body)).toBe("Existing content");
+    expect(result.response.headers?.["Content-Type"]).toBe("text/plain");
+    expect(result.response.headers?.["ETag"]).toBeDefined();
+  });
+
+  it("returns matching ETag for GET after HEAD and changes on rewrite", async () => {
+    const persist = createMemoryAdapter();
+    const logger = createLogger();
+    const path = ["etag.txt"] as const;
+    await persist.writeFile([...path], new TextEncoder().encode("v1"), "text/plain");
+    const head1 = await handleHeadRequest("/etag.txt", { persist });
+    const get1 = await handleGetRequest("/etag.txt", { persist, logger });
+    expect(head1.response.headers?.["ETag"]).toBe(get1.response.headers?.["ETag"]);
+    // rewrite
+    await new Promise((r) => setTimeout(r, 5));
+    await persist.writeFile([...path], new TextEncoder().encode("v2"), "text/plain");
+    const head2 = await handleHeadRequest("/etag.txt", { persist });
+    expect(head2.response.headers?.["ETag"]).not.toBe(head1.response.headers?.["ETag"]);
   });
 
   it("generates content for empty file with hooks", async () => {

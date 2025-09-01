@@ -1,18 +1,16 @@
-// @ts-nocheck
 /**
  * @file Ink UI: 4-panels dashboard (Logo/Settings, HTTP I/O, LLM Sessions, FS CRUD)
  */
 import React, { useEffect, useState } from "react";
-// @ts-ignore - type shims are provided
 import { render, Box, Text, Spacer, useStdout } from "ink";
-import gradient from "ink-gradient";
+import Gradient from "ink-gradient";
 import type { TrackEvent } from "./store";
 
 type Store = { getState: () => { events: TrackEvent[] }; subscribe: (fn: () => void) => () => void };
 
 function Panel({ title, children, borderColor = "cyan", width = 50, height = 14 }: { 
   title: string; 
-  children?: any;
+  children?: unknown;
   borderColor?: string;
   width?: number;
   height?: number;
@@ -56,24 +54,21 @@ function Lines({ items, maxLines = 10, color = "gray", isLLM = false }: {
           // Special formatting for LLM events
           const isStart = content.startsWith("START");
           const isEnd = content.startsWith("END");
-          const actionColor = isStart ? "yellow" : isEnd ? "green" : color;
-          const symbol = isStart ? "→" : isEnd ? "←" : "•";
-          
-          // eslint-disable-next-line react/no-array-index-key
+          const actionColor = isStart ? "yellow" : (isEnd ? "green" : color);
+          const symbol = isStart ? "→" : (isEnd ? "←" : "•");
           return (
-            <Box key={i} marginBottom={0}>
-              <Text dimColor color="gray">{timestamp?.substring(11, 19)} </Text>
+            <Box key={`${l}-${i}`} marginBottom={0}>
+              <Text dimColor color="gray">{timestamp ? timestamp.substring(11, 19) : ""} </Text>
               <Text color={actionColor}>{symbol} </Text>
-              <Text color={color} wrap="truncate-end">{content?.substring(0, 55)}</Text>
+              <Text color={color} wrap="truncate-end">{content ? content.substring(0, 55) : ""}</Text>
             </Box>
           );
         }
-        
-        // eslint-disable-next-line react/no-array-index-key
+
         return (
-          <Box key={i} marginBottom={0}>
-            <Text dimColor color="gray">{timestamp?.substring(11, 19)} </Text>
-            <Text color={color} wrap="truncate-end">{content?.substring(0, 35)}</Text>
+          <Box key={`${l}-${i}`} marginBottom={0}>
+            <Text dimColor color="gray">{timestamp ? timestamp.substring(11, 19) : ""} </Text>
+            <Text color={color} wrap="truncate-end">{content ? content.substring(0, 35) : ""}</Text>
           </Box>
         );
       })}
@@ -82,42 +77,44 @@ function Lines({ items, maxLines = 10, color = "gray", isLLM = false }: {
 }
 
 function formatHttpEvent(e: TrackEvent): string {
-  const p = e.payload as any;
-  const method = p.method || p.operation || "";
-  const path = p.path || "";
-  const status = p.status ? `[${p.status}]` : "";
+  const p = (e.payload ?? {}) as Record<string, unknown>;
+  const methodVal = typeof p.method === "string" ? p.method : (typeof p.operation === "string" ? p.operation : "");
+  const pathVal = typeof p.path === "string" ? p.path : "";
+  const statusVal = typeof p.status === "number" ? `[${p.status}]` : "";
+  const method = methodVal;
+  const path = pathVal;
+  const status = statusVal;
   return `${e.ts} ${method} ${path} ${status}`;
 }
 
 function formatLLMEvent(e: TrackEvent): string {
-  const p = e.payload as any;
+  const p = (e.payload ?? {}) as Record<string, unknown>;
   const isStart = e.channel === "llm.start";
   
   if (isStart) {
     // For llm.start events
-    const context = p.context || "";
-    const path = p.path || "";
-    const model = p.model || "";
-    const depth = p.depth !== null && p.depth !== undefined ? `d:${p.depth}` : "";
+    const context = typeof p.context === "string" ? p.context : "";
+    const path = typeof p.path === "string" ? p.path : "";
+    const depth = p.depth !== null && p.depth !== undefined ? `d:${String(p.depth)}` : "";
     return `${e.ts} START ${context} ${path} ${depth}`;
   } else {
     // For llm.end events
-    const context = p.context || "";
-    const path = p.path || "";
-    const stats = p.stats || {};
+    const context = typeof p.context === "string" ? p.context : "";
+    const path = typeof p.path === "string" ? p.path : "";
+    const stats = (p.stats ?? {}) as Record<string, unknown>;
     
     if (context === "fabricateListing") {
-      const dirs = stats.dirs || 0;
-      const files = stats.files || 0;
-      const dirNames = stats.dirNames || [];
-      const fileNames = stats.fileNames || [];
-      const items = [...dirNames.map((d: string) => `📁${d}`), ...fileNames.map((f: string) => `📄${f}`)].join(", ");
+      const dirs = typeof stats.dirs === "number" ? stats.dirs : 0;
+      const files = typeof stats.files === "number" ? stats.files : 0;
+      const dirNames = Array.isArray(stats.dirNames) ? (stats.dirNames as string[]) : [];
+      const fileNames = Array.isArray(stats.fileNames) ? (stats.fileNames as string[]) : [];
+      const items = [...dirNames.map((d) => `📁${d}`), ...fileNames.map((f) => `📄${f}`)].join(", ");
       if (items) {
         return `${e.ts} END ${path} [${dirs}d,${files}f] ${items.substring(0, 50)}`;
       }
       return `${e.ts} END ${path} [${dirs}d,${files}f]`;
     } else if (context === "fabricateFileContent") {
-      const size = stats.size || 0;
+      const size = typeof stats.size === "number" ? stats.size : 0;
       return `${e.ts} END ${path} [${size}b]`;
     }
     
@@ -125,19 +122,16 @@ function formatLLMEvent(e: TrackEvent): string {
   }
 }
 
-function formatFSEvent(e: TrackEvent): string {
-  const p = e.payload as any;
-  const op = e.channel.replace("fs.", "").toUpperCase();
-  const path = p.path || "";
-  const status = p.status ? `[${p.status}]` : "";
-  return `${e.ts} ${op} ${path} ${status}`;
-}
+// FS event formatter omitted: UI focuses on HTTP/LLM panels and the activity log.
 
+/**
+ * Renders a single activity line with icon/action derived from the event.
+ */
 function ActivityLine({ event, index }: { event: TrackEvent; index: number }) {
-  const p = event.payload as any;
+  const p = (event.payload ?? {}) as Record<string, unknown>;
   const timestamp = event.ts.substring(11, 19);
-  const path = p.path || "";
-  const fileName = path.split('/').pop() || path;
+  const path = typeof p.path === "string" ? p.path : "";
+  const fileName = path.split('/').pop() ?? path;
   
   // Determine the operation type and styling
   const isLLMCreated = event.channel === "llm.end" && p.context === "fabricateFileContent";
@@ -150,97 +144,76 @@ function ActivityLine({ event, index }: { event: TrackEvent; index: number }) {
   const isPut = event.channel === "webdav" && p.method === "PUT";
   const isMkcol = event.channel === "webdav" && p.method === "MKCOL";
   
-  let icon = "•";
-  let action = "";
-  let color = "gray";
-  let actionColor = "white";
-  
-  if (isLLMCreated) {
-    icon = "🤖";
-    action = "CREATE";
-    color = "magenta";
-    actionColor = "magenta";
-  } else if (isMkcol || isMkdir) {
-    icon = "📁";
-    action = "MKDIR";
-    color = "blue";
-    actionColor = "blue";
-  } else if (isPut || isWrite) {
-    icon = "✏️";
-    action = "WRITE";
-    color = "green";
-    actionColor = "green";
-  } else if (isGet || isRead) {
-    icon = "👁";
-    action = "READ";
-    color = "cyan";
-    actionColor = "cyan";
-  } else if (isDelete) {
-    icon = "🗑";
-    action = "DELETE";
-    color = "red";
-    actionColor = "red";
-  } else if (isPropfind) {
-    icon = "🔍";
-    action = "LIST";
-    color = "yellow";
-    actionColor = "yellow";
+  const style = (() => {
+    if (isLLMCreated) { return { icon: "🤖", action: "CREATE", color: "magenta", actionColor: "magenta" }; }
+    if (isMkcol || isMkdir) { return { icon: "📁", action: "MKDIR", color: "blue", actionColor: "blue" }; }
+    if (isPut || isWrite) { return { icon: "✏️", action: "WRITE", color: "green", actionColor: "green" }; }
+    if (isGet || isRead) { return { icon: "👁", action: "READ", color: "cyan", actionColor: "cyan" }; }
+    if (isDelete) { return { icon: "🗑", action: "DELETE", color: "red", actionColor: "red" }; }
+    if (isPropfind) { return { icon: "🔍", action: "LIST", color: "yellow", actionColor: "yellow" }; }
+    return { icon: "•", action: "", color: "gray", actionColor: "white" };
+  })();
+
+  if (!style.action) {
+    return null;
   }
   
-  if (!action) return null;
-  
-  // eslint-disable-next-line react/no-array-index-key
   return (
-    <Box key={index} marginBottom={0}>
+    <Box key={`${timestamp}-${index}`} marginBottom={0}>
       <Text dimColor color="gray">{timestamp} </Text>
-      <Text>{icon}</Text>
-      <Text color={actionColor} bold>[{action}]</Text>
-      <Text color={color}> {fileName}</Text>
+      <Text>{style.icon}</Text>
+      <Text color={style.actionColor} bold>[{style.action}]</Text>
+      <Text color={style.color}> {fileName}</Text>
     </Box>
   );
 }
 
+/**
+ * Ink app rendering a dashboard of WebDAV/LLM/FS events from a TrackStore.
+ * Looks like a static layout; actually adapts to terminal size and live updates.
+ */
 export function InkApp({ store }: { store: Store }) {
-  const [events, setEvents] = useState<TrackEvent[]>(store.getState().events);
   const [time, setTime] = useState(new Date());
   const { stdout } = useStdout();
   
   // Calculate dimensions based on terminal size
-  const termWidth = stdout.columns || 80;
-  const termHeight = stdout.rows || 24;
+  const termWidth = stdout.columns !== undefined ? stdout.columns : 80;
+  const termHeight = stdout.rows !== undefined ? stdout.rows : 24;
   const topPanelHeight = Math.max(8, Math.floor((termHeight - 16) * 0.6)); // 60% for top panels
   const bottomPanelHeight = Math.max(6, Math.floor((termHeight - 16) * 0.4)); // 40% for activity log
   const panelWidth = Math.floor((termWidth - 4) / 2); // Two panels side by side
   const fullWidth = termWidth - 3; // Full width for bottom panel
   
-  useEffect(() => store.subscribe(() => setEvents(store.getState().events)), [store]);
   useEffect(() => {
     const timer = setInterval(() => setTime(new Date()), 1000);
     return () => clearInterval(timer);
   }, []);
 
+  const events = store.getState().events as TrackEvent[];
   const httpEvents = events.filter((e: TrackEvent) => e.channel === "webdav");
   const http = httpEvents.map(formatHttpEvent);
   
   const llmEvents = events.filter((e: TrackEvent) => e.channel === "llm.start" || e.channel === "llm.end");
   const llmCombined = llmEvents.map(formatLLMEvent);
   
-  const fsEvents = events.filter((e: TrackEvent) => e.channel.startsWith("fs."));
-  const fsOps = fsEvents.map(formatFSEvent);
+  // FS events are summarized in the activity panel; no top-panel rendering.
   
   // Activity events for the bottom panel
   const activityEvents = events.filter((e: TrackEvent) => {
-    const p = e.payload as any;
-    return (
-      (e.channel === "llm.end" && p.context === "fabricateFileContent") ||
-      (e.channel === "webdav" && ["MKCOL", "PUT", "GET", "PROPFIND", "DELETE"].includes(p.method)) ||
-      e.channel.startsWith("fs.")
-    );
+    const p = (e.payload ?? {}) as Record<string, unknown>;
+    const isLlmCreate = e.channel === "llm.end" ? (p.context === "fabricateFileContent") : false;
+    const isHttpKnown = (() => {
+      if (e.channel !== "webdav") { return false; }
+      if (typeof p.method !== "string") { return false; }
+      return ["MKCOL", "PUT", "GET", "PROPFIND", "DELETE"].includes(p.method);
+    })();
+    const isFs = e.channel.startsWith("fs.");
+    return isLlmCreate ? true : (isHttpKnown ? true : isFs);
   });
   
   // Calculate stats
-  const reqCount = httpEvents.filter((e: any) => e.payload?.direction === "IN").length;
-  const resCount = httpEvents.filter((e: any) => e.payload?.direction === "OUT").length;
+  const reqCount = httpEvents.filter((e) => (e.payload as Record<string, unknown> | undefined)?.direction === "IN").length;
+  const resCount = httpEvents.filter((e) => (e.payload as Record<string, unknown> | undefined)?.direction === "OUT").length;
   const llmCalls = llmEvents.filter((e: TrackEvent) => e.channel === "llm.start").length;
   
   // Detect mode from events
@@ -248,7 +221,7 @@ export function InkApp({ store }: { store: Store }) {
   const appPort = events.find((e: TrackEvent) => e.channel === "app.port")?.payload as { host?: string; port?: number } | undefined;
   const llmModel = llmEvents.find((e: TrackEvent) => e.channel === "llm.start")?.payload as { model?: string } | undefined;
 
-  const Gradient = gradient.default || gradient;
+  // Ink gradient component (ESM default import)
   
   return (
     <Box flexDirection="column">
@@ -283,23 +256,23 @@ export function InkApp({ store }: { store: Store }) {
           <Box flexDirection="column">
             <Box marginBottom={0}>
               <Text color="cyan" bold>▸ Mode: </Text>
-              <Text color="white">{persistMode?.mode === "fs" ? "Persistent" : persistMode?.mode === "memory" ? "In-Memory" : "Unknown"}</Text>
-              {persistMode?.root && (
-                <>
-                  <Text dimColor> | Root: </Text>
-                  <Text color="blue">{persistMode.root}</Text>
-                </>
-              )}
+              <Text color="white">{(() => { const m = persistMode?.mode; if (m === "fs") { return "Persistent"; } if (m === "memory") { return "In-Memory"; } return "Unknown"; })()}</Text>
+              {(() => { if (persistMode?.root) { return (<><Text dimColor> | Root: </Text><Text color="blue">{persistMode.root}</Text></>); } return null; })()}
             </Box>
             <Box>
               <Text color="cyan" bold>▸ Server: </Text>
-              <Text color="white">{appPort ? `${appPort.host || "127.0.0.1"}:${appPort.port || 8787}` : "Starting..."}</Text>
-              {llmModel?.model && (
-                <>
-                  <Text dimColor> | LLM: </Text>
-                  <Text color="magenta">{llmModel.model}</Text>
-                </>
-              )}
+              <Text color="white">{appPort ? `${(appPort.host ?? "127.0.0.1")}:${(appPort.port ?? 8787)}` : "Starting..."}</Text>
+              {(() => {
+                if (llmModel?.model) {
+                  return (
+                    <>
+                      <Text dimColor> | LLM: </Text>
+                      <Text color="magenta">{llmModel.model}</Text>
+                    </>
+                  );
+                }
+                return null;
+              })()}
             </Box>
           </Box>
         </Box>
@@ -332,7 +305,7 @@ export function InkApp({ store }: { store: Store }) {
           </Box>
           <Box flexGrow={1} flexDirection="column" overflow="hidden">
             {activityEvents.slice(-(bottomPanelHeight - 3)).map((event, i) => (
-              <ActivityLine key={`activity-${i}`} event={event} index={i} />
+              <ActivityLine key={`${event.ts}-${i}`} event={event} index={i} />
             ))}
           </Box>
         </Box>
@@ -341,7 +314,15 @@ export function InkApp({ store }: { store: Store }) {
   );
 }
 
+/**
+ * Starts the full-screen Ink UI with alternate screen handling.
+ */
 export function runInkUI(store: Store) {
+  /**
+   * Launches the Ink UI and toggles alternate screen for a full-screen feel.
+   * While it looks like simple render+cleanup, it coordinates signal handling
+   * and ensures the terminal state is restored on exit and on app resolve.
+   */
   const app = render(<InkApp store={store} />, {
     exitOnCtrlC: true,
   });

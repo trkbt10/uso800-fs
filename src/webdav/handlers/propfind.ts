@@ -20,7 +20,8 @@ async function runBeforePropfindHook(hooks: WebDavHooks | undefined, ctx: { urlP
 export async function handlePropfindRequest(
   urlPath: string,
   depth: string | null | undefined,
-  options: HandlerOptions
+  options: HandlerOptions,
+  bodyText?: string | null,
 ): Promise<HandlerResult> {
   const { persist, logger, hooks, shouldIgnore } = options;
   const segments = pathToSegments(urlPath);
@@ -33,7 +34,7 @@ export async function handlePropfindRequest(
     const maybe = await runBeforePropfindHook(hooks, { urlPath, segments, depth: normalizedDepth, persist, logger });
     if (maybe) { return { response: maybe }; }
     // proceed to list (hook may have created it), else 404
-    const res = await buildPropfindResponse(persist, urlPath, segments, normalizedDepth, logger, shouldIgnore);
+    const res = await buildPropfindResponse(persist, urlPath, segments, normalizedDepth, logger, shouldIgnore, bodyText ?? undefined);
     return { response: res };
   }
 
@@ -44,15 +45,14 @@ export async function handlePropfindRequest(
       const names = await persist.readdir(segments);
       if (names.length === 0) {
         await runBeforePropfindHook(hooks, { urlPath, segments, depth: normalizedDepth, persist, logger });
-        const res = await buildPropfindResponse(persist, urlPath, segments, normalizedDepth, logger, shouldIgnore);
+        const res = await buildPropfindResponse(persist, urlPath, segments, normalizedDepth, logger, shouldIgnore, bodyText ?? undefined);
         return { response: res };
       }
     }
   } catch {
     // Fall through to normal PROPFIND
   }
-
-  const response = await buildPropfindResponse(persist, urlPath, segments, normalizedDepth, logger, shouldIgnore);
+  const response = await buildPropfindResponse(persist, urlPath, segments, normalizedDepth, logger, shouldIgnore, bodyText ?? undefined);
   return { response };
 }
 
@@ -64,6 +64,36 @@ async function statOrNull(persist: PersistAdapter, path: string[]): Promise<Stat
   try { return await persist.stat(path); } catch { return null; }
 }
 
+type PropfindMode = { mode: "allprop" } | { mode: "propname" } | { mode: "prop"; keys: string[] };
+
+function parsePropfindBody(bodyText?: string): PropfindMode {
+  if (!bodyText || bodyText.trim().length === 0) { return { mode: "allprop" }; }
+  const lower = bodyText.toLowerCase();
+  if (/<\s*[^>]*propname[^>]*\/>/i.test(bodyText) || lower.includes("<propname")) {
+    return { mode: "propname" };
+  }
+  if (/<\s*[^>]*allprop[^>]*\/>/i.test(bodyText) || lower.includes("<allprop")) {
+    return { mode: "allprop" };
+  }
+  const propBlock = /<\s*[^>]*prop[^>]*>([\s\S]*?)<\s*\/\s*[^>]*prop\s*>/i.exec(bodyText);
+  if (!propBlock) { return { mode: "allprop" }; }
+  const inner = propBlock[1] ?? "";
+  const keys: string[] = [];
+  const tagRe = /<\s*([A-Za-z0-9_:.-]+)\b[^>]*\/?\s*>/g;
+  for (const m of inner.matchAll(tagRe)) {
+    const tag = m[1];
+    if (!tag) { continue; }
+    const name = tag.trim();
+    if (name.toLowerCase() === "prop") { continue; }
+    keys.push(name);
+  }
+  return { mode: "prop", keys };
+}
+
+function computeEtag(st: Stat): string {
+  return `W/"${String(st.size ?? 0)}-${st.mtime ?? ""}"`;
+}
+
 async function buildPropfindResponse(
   persist: PersistAdapter,
   urlPath: string,
@@ -71,6 +101,7 @@ async function buildPropfindResponse(
   depth: string | null,
   logger?: WebDAVLogger,
   shouldIgnore?: (fullPath: string, baseName: string) => boolean,
+  bodyText?: string,
 ): Promise<DavResponse> {
   const exists = await persist.exists(parts);
   if (!exists) {
@@ -82,10 +113,53 @@ async function buildPropfindResponse(
   const selfHref = urlPath.endsWith("/") ? urlPath : urlPath + "/";
   const entryParts: string[] = [];
   const header = `<?xml version="1.0" encoding="utf-8"?>\n<D:multistatus xmlns:D="DAV:">`;
-  const selfEntry = `\n<D:response>\n  <D:href>${selfHref}</D:href>\n  <D:propstat>\n    <D:prop>\n      <D:displayname>${parts[parts.length - 1] ?? "/"}</D:displayname>\n      <D:getcontentlength>${stat.size ?? 0}</D:getcontentlength>\n      <D:resourcetype>${isDir ? "<D:collection/>" : ""}</D:resourcetype>\n    </D:prop>\n    <D:status>HTTP/1.1 200 OK</D:status>\n  </D:propstat>\n</D:response>`;
+  const mode = parsePropfindBody(bodyText);
+  function defaultKeys(): string[] {
+    return [
+      "D:displayname",
+      "D:getcontentlength",
+      "D:resourcetype",
+      "D:getlastmodified",
+      "D:getetag",
+    ];
+  }
+  function renderProps(name: string, st: Stat, keys: string[] | null, propnameOnly: boolean): string {
+    const map: Record<string, string> = {
+      "D:displayname": name,
+      "D:getcontentlength": String(st.size ?? 0),
+      "D:resourcetype": st.type === "dir" ? "<D:collection/>" : "",
+      "D:getlastmodified": st.mtime ?? "",
+      "D:getetag": computeEtag(st),
+    };
+    const selected = keys ? keys : defaultKeys();
+    const out: string[] = [];
+    for (const k of selected) {
+      const val = map[k] ?? "";
+      if (propnameOnly) {
+        out.push(`<${k}/>\n`);
+      } else if (k === "D:resourcetype") {
+        out.push(`<D:resourcetype>${val}</D:resourcetype>`);
+      } else {
+        out.push(`<${k}>${val}</${k}>`);
+      }
+    }
+    return out.join("\n      ");
+  }
+  const selfName = parts[parts.length - 1] ?? "/";
+  const selfEntryProps = (() => {
+    if (mode.mode === "propname") { return renderProps(selfName, stat, defaultKeys(), true); }
+    if (mode.mode === "prop") { return renderProps(selfName, stat, mode.keys, false); }
+    return renderProps(selfName, stat, null, false);
+  })();
+  const selfEntry = `\n<D:response>\n  <D:href>${selfHref}</D:href>\n  <D:propstat>\n    <D:prop>\n      ${selfEntryProps}\n    </D:prop>\n    <D:status>HTTP/1.1 200 OK</D:status>\n  </D:propstat>\n</D:response>`;
   function pushEntry(parentHref: string, name: string, st: Stat) {
     const childIsDir = st.type === "dir";
-    entryParts.push(`\n<D:response>\n  <D:href>${parentHref}${encodeURIComponent(name)}${childIsDir ? "/" : ""}</D:href>\n  <D:propstat>\n    <D:prop>\n      <D:displayname>${name}</D:displayname>\n      <D:getcontentlength>${st.size ?? 0}</D:getcontentlength>\n      <D:resourcetype>${childIsDir ? "<D:collection/>" : ""}</D:resourcetype>\n    </D:prop>\n    <D:status>HTTP/1.1 200 OK</D:status>\n  </D:propstat>\n</D:response>`);
+    const childProps = (() => {
+      if (mode.mode === "propname") { return renderProps(name, st, defaultKeys(), true); }
+      if (mode.mode === "prop") { return renderProps(name, st, mode.keys, false); }
+      return renderProps(name, st, null, false);
+    })();
+    entryParts.push(`\n<D:response>\n  <D:href>${parentHref}${encodeURIComponent(name)}${childIsDir ? "/" : ""}</D:href>\n  <D:propstat>\n    <D:prop>\n      ${childProps}\n    </D:prop>\n    <D:status>HTTP/1.1 200 OK</D:status>\n  </D:propstat>\n</D:response>`);
   }
   if (depth !== "0" && isDir) {
     const baseHref = selfHref;

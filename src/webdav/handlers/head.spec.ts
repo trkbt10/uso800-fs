@@ -27,7 +27,7 @@ describe("HEAD handler", () => {
     await persist.writeFile(["file.txt"], data, "text/plain");
     const res = await handleHeadRequest("/file.txt", { persist });
     expect(res.response.status).toBe(200);
-    expect(res.response.headers?.["Content-Type"]).toBe("application/octet-stream");
+    expect(res.response.headers?.["Content-Type"]).toBe("text/plain");
     expect(res.response.headers?.["Content-Length"]).toBe(String(data.length));
     expect(res.response.headers?.["Accept-Ranges"]).toBe("bytes");
   });

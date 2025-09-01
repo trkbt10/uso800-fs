@@ -10,6 +10,7 @@ export type Stat = {
   type: EntryType;
   size?: number;
   mtime?: string; // ISO string
+  mime?: string; // optional persisted mime type if available
 };
 
 export type PersistAdapter = {
@@ -23,4 +24,3 @@ export type PersistAdapter = {
   move(from: PathParts, to: PathParts): Promise<void>;
   copy(from: PathParts, to: PathParts): Promise<void>;
 };
-

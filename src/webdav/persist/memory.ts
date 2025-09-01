@@ -104,6 +104,7 @@ export function createMemoryAdapter(): PersistAdapter {
         type: entry.type,
         size: entry.type === "file" ? entry.content?.length : undefined,
         mtime: entry.mtime,
+        mime: entry.type === "file" ? entry.mime : undefined,
       };
     },
 

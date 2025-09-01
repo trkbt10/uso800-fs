@@ -75,6 +75,7 @@ export type DavStateStore = {
   releaseLock(path: string, token?: string): Promise<boolean>;
   getProps(path: string): Promise<PropsRecord>;
   mergeProps(path: string, patch: PropsRecord): Promise<void>;
+  setProps(path: string, props: PropsRecord): Promise<void>;
 };
 
 /**
@@ -110,6 +111,10 @@ export function createDavStateStore(persist: PersistAdapter): DavStateStore {
       const cur = await readPropsRecord(persist, file);
       const next = { ...(cur ?? {}), ...patch };
       await writeJson(persist, file, next);
+    },
+    async setProps(path: string, props: PropsRecord): Promise<void> {
+      const file = propsPartsFor(path);
+      await writeJson(persist, file, props);
     },
   };
 }
