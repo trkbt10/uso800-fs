@@ -41,14 +41,31 @@ export async function handleProppatchRequest(urlPath: string, bodyText: string, 
   const current = await store.getProps(urlPath);
   const patch = parseProppatchXml(bodyText);
   const next: Record<string, string> = { ...current, ...patch.set };
+  const removedExisting: string[] = [];
+  const removeNotFound: string[] = [];
   if (patch.remove.length > 0) {
     for (const k of patch.remove) {
-      if (k in next) { delete next[k]; }
+      if (k in next || k in current) {
+        if (k in next) { delete next[k]; }
+        removedExisting.push(k);
+      } else {
+        removeNotFound.push(k);
+      }
     }
   }
   await store.setProps(urlPath, next);
-  const allKeys = [...Object.keys(patch.set), ...patch.remove];
-  const entries = allKeys.map((k) => `<${k}/>\n`).join("");
-  const body = `<?xml version="1.0" encoding="utf-8"?>\n<D:multistatus xmlns:D="DAV:">\n<D:response>\n  <D:href>${urlPath}</D:href>\n  <D:propstat>\n    <D:prop>\n      ${entries}    </D:prop>\n    <D:status>HTTP/1.1 200 OK</D:status>\n  </D:propstat>\n</D:response>\n</D:multistatus>`;
+  const okKeys = [...Object.keys(patch.set), ...removedExisting];
+  const notFoundKeys = removeNotFound;
+  const okBlock = (() => {
+    if (okKeys.length === 0) { return ""; }
+    const items = okKeys.map((k) => `      <${k}/>`).join("\n");
+    return `\n  <D:propstat>\n    <D:prop>\n${items}\n    </D:prop>\n    <D:status>HTTP/1.1 200 OK</D:status>\n  </D:propstat>`;
+  })();
+  const nfBlock = (() => {
+    if (notFoundKeys.length === 0) { return ""; }
+    const items = notFoundKeys.map((k) => `      <${k}/>`).join("\n");
+    return `\n  <D:propstat>\n    <D:prop>\n${items}\n    </D:prop>\n    <D:status>HTTP/1.1 404 Not Found</D:status>\n  </D:propstat>`;
+  })();
+  const body = `<?xml version="1.0" encoding="utf-8"?>\n<D:multistatus xmlns:D="DAV:">\n<D:response>\n  <D:href>${urlPath}</D:href>${okBlock}${nfBlock}\n</D:response>\n</D:multistatus>`;
   return { response: { status: 207, headers: { "Content-Type": "application/xml" }, body } };
 }

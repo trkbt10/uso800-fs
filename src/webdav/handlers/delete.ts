@@ -3,6 +3,7 @@
  */
 import type { HandlerOptions, HandlerResult } from "../../webdav/handlers/types";
 import { pathToSegments } from "../../utils/path-utils";
+import { mapErrorToDav } from "../errors";
 
 /**
  * Handle DELETE.
@@ -20,8 +21,9 @@ export async function handleDeleteRequest(urlPath: string, options: HandlerOptio
     await persist.remove(parts, { recursive: true });
     logger?.logDelete(urlPath, 204);
     return { response: { status: 204 } };
-  } catch {
-    logger?.logDelete(urlPath, 500);
-    return { response: { status: 500 } };
+  } catch (err) {
+    const mapped = mapErrorToDav(err);
+    logger?.logDelete(urlPath, mapped.status);
+    return { response: { status: mapped.status } };
   }
 }

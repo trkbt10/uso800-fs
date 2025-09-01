@@ -3,6 +3,7 @@
  */
 import type { HandlerOptions, HandlerResult } from "../../webdav/handlers/types";
 import { pathToSegments } from "../../utils/path-utils";
+import { mapErrorToDav } from "../errors";
 
 /**
  * Handle HEAD.
@@ -23,7 +24,8 @@ export async function handleHeadRequest(urlPath: string, options: HandlerOptions
     const etag = `W/"${String(stat.size ?? 0)}-${stat.mtime ?? ""}"`;
     const contentType = stat.mime ?? "application/octet-stream";
     return { response: { status: 200, headers: { "Content-Type": contentType, "Content-Length": String(stat.size ?? 0), "Accept-Ranges": "bytes", ...(stat.mtime ? { "Last-Modified": stat.mtime } : {}), ...(etag ? { ETag: etag } : {}) } } };
-  } catch {
-    return { response: { status: 500 } };
+  } catch (err) {
+    const mapped = mapErrorToDav(err);
+    return { response: { status: mapped.status } };
   }
 }

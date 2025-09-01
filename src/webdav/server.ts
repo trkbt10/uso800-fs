@@ -28,6 +28,7 @@ import { createDavStateStore } from "./dav-state";
 import { checkDepthInfinityRequiredForDir, etagMatchesIfHeader, requireLockOk } from "./http-guards";
 import { maybeIgnored } from "./ignore-guards";
 import { toResponse } from "./response";
+import { parseMkcolProps } from "./xml/mkcol-parse";
 
 /**
  * Creates a Hono-based WebDAV app using the provided PersistAdapter.
@@ -189,16 +190,22 @@ export function makeWebdavApp(opts: {
         logger.logOutput("MKCOL", p, 404);
         return send(c, { status: 404 });
       }
-      try {
-        const bodyText = await c.req.text();
-        if (bodyText && bodyText.length > 0) {
+      const persist = basePersist;
+      const contentType = (c.req.header("Content-Type") ?? "").toLowerCase();
+      const bodyText = await c.req.text().then((t) => t).catch(() => "");
+      if (bodyText.length > 0) {
+        if (!contentType.includes("xml")) {
           return send(c, { status: 415 });
         }
-      } catch {
-        // Ignore body read errors intentionally; MKCOL with body is unsupported.
       }
-      const persist = basePersist;
+      const props: Record<string, string> | null = parseMkcolProps(bodyText, contentType);
       const result = await handleMkcolRequest(p, { persist, hooks, logger });
+      if (result.response.status === 201) {
+        if (props && Object.keys(props).length > 0) {
+          const store = createDavStateStore(persist);
+          await store.setProps(p, props);
+        }
+      }
       return send(c, result.response);
     }
 
@@ -224,46 +231,25 @@ export function makeWebdavApp(opts: {
       return send(c, result.response);
     }
 
-    if (method === "MOVE") {
+    if (method === "COPY" || method === "MOVE") {
       const destination = c.req.header("Destination");
-      if (!destination) {
-        return send(c, { status: 400 });
-      }
+      if (!destination) { return send(c, { status: 400 }); }
       const overwrite = (c.req.header("Overwrite") ?? "T").toUpperCase() !== "F";
       const persist = basePersist;
       const destUrl = new URL(destination);
       const okDepth = await checkDepthInfinityRequiredForDir(persist, p, () => c.req.header("Depth"));
       if (!okDepth) { return send(c, { status: 400 }); }
-      // Lock enforcement for source and destination
       const srcOk = await requireLockOk(davState, p, c.req.raw.headers, "Lock-Token");
       const dstOk = await requireLockOk(davState, destUrl.pathname, c.req.raw.headers, "Lock-Token");
       if (!srcOk || !dstOk) { return send(c, { status: 423 }); }
-      // ETag precondition (If) for source
       const etagOk = await etagMatchesIfHeader(basePersist, p, c.req.raw.headers);
       if (!etagOk) { return send(c, { status: 412 }); }
-      const result = await handleMoveRequest(p, destUrl.pathname, { persist, logger, overwrite });
-      return send(c, result.response);
-    }
-
-    if (method === "COPY") {
-      const destination = c.req.header("Destination");
-      if (!destination) {
-        return send(c, { status: 400 });
+      if (method === "MOVE") {
+        const moved = await handleMoveRequest(p, destUrl.pathname, { persist, logger, overwrite });
+        return send(c, moved.response);
       }
-      const overwrite = (c.req.header("Overwrite") ?? "T").toUpperCase() !== "F";
-      const persist = basePersist;
-      const destUrl = new URL(destination);
-      const okDepthCopy = await checkDepthInfinityRequiredForDir(persist, p, () => c.req.header("Depth"));
-      if (!okDepthCopy) { return send(c, { status: 400 }); }
-      // Lock enforcement for source and destination
-      const srcOk = await requireLockOk(davState, p, c.req.raw.headers, "Lock-Token");
-      const dstOk = await requireLockOk(davState, destUrl.pathname, c.req.raw.headers, "Lock-Token");
-      if (!srcOk || !dstOk) { return send(c, { status: 423 }); }
-      // ETag precondition (If) for source
-      const etagOk = await etagMatchesIfHeader(basePersist, p, c.req.raw.headers);
-      if (!etagOk) { return send(c, { status: 412 }); }
-      const result = await handleCopyRequest(p, destUrl.pathname, { persist, logger, overwrite });
-      return send(c, result.response);
+      const copied = await handleCopyRequest(p, destUrl.pathname, { persist, logger, overwrite });
+      return send(c, copied.response);
     }
 
     await next();

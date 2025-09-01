@@ -4,6 +4,7 @@
 import { pathToSegments } from "../../utils/path-utils";
 import type { HandlerOptions, HandlerResult } from "../../webdav/handlers/types";
 import type { WebDavHooks } from "../../webdav/hooks";
+import { mapErrorToDav } from "../errors";
 
 function bufferToUint8Array(body: ArrayBuffer | Uint8Array): Uint8Array {
   return body instanceof Uint8Array ? body : new Uint8Array(body);
@@ -49,8 +50,9 @@ export async function handlePutRequest(
     await persist.writeFile(parts, state.data, state.contentType);
     logger?.logWrite(urlPath, 201, state.data.length);
     return { response: { status: 201, headers: { "Content-Length": String(state.data.length), "Content-Type": state.contentType ?? "application/octet-stream" } } };
-  } catch {
-    logger?.logWrite(urlPath, 500);
-    return { response: { status: 500 } };
+  } catch (err) {
+    const mapped = mapErrorToDav(err);
+    logger?.logWrite(urlPath, mapped.status);
+    return { response: { status: mapped.status } };
   }
 }

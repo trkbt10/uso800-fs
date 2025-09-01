@@ -112,4 +112,16 @@ describe("PROPFIND handler", () => {
     const xml = String(result.response.body ?? "");
     expect(xml).toContain("<D:getcontentlength>3</D:getcontentlength>");
   });
+
+  it("prop mode returns 404 propstat for unknown properties", async () => {
+    const persist = createMemoryAdapter();
+    const logger = createLogger();
+    await persist.writeFile(["d.txt"], new TextEncoder().encode("x"), "text/plain");
+    const body = `<?xml version="1.0"?><D:propfind xmlns:D="DAV:"><D:prop><D:getcontentlength/><Z:unknown xmlns:Z="urn:x"/></D:prop></D:propfind>`;
+    const result = await handlePropfindRequest("/d.txt", "0", { persist, logger }, body);
+    const xml = String(result.response.body ?? "");
+    expect(xml).toContain("<D:status>HTTP/1.1 404 Not Found</D:status>");
+    expect(xml).toContain("<Z:unknown");
+    expect(xml).toContain("<D:getcontentlength>");
+  });
 });

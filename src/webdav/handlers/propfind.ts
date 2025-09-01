@@ -34,7 +34,7 @@ export async function handlePropfindRequest(
     const maybe = await runBeforePropfindHook(hooks, { urlPath, segments, depth: normalizedDepth, persist, logger });
     if (maybe) { return { response: maybe }; }
     // proceed to list (hook may have created it), else 404
-    const res = await buildPropfindResponse(persist, urlPath, segments, normalizedDepth, logger, shouldIgnore, bodyText ?? undefined);
+    const res = await buildPropfindResponse(createDataLoaderAdapter(persist), urlPath, segments, normalizedDepth, logger, shouldIgnore, bodyText ?? undefined);
     return { response: res };
   }
 
@@ -45,18 +45,19 @@ export async function handlePropfindRequest(
       const names = await persist.readdir(segments);
       if (names.length === 0) {
         await runBeforePropfindHook(hooks, { urlPath, segments, depth: normalizedDepth, persist, logger });
-        const res = await buildPropfindResponse(persist, urlPath, segments, normalizedDepth, logger, shouldIgnore, bodyText ?? undefined);
+        const res = await buildPropfindResponse(createDataLoaderAdapter(persist), urlPath, segments, normalizedDepth, logger, shouldIgnore, bodyText ?? undefined);
         return { response: res };
       }
     }
   } catch {
     // Fall through to normal PROPFIND
   }
-  const response = await buildPropfindResponse(persist, urlPath, segments, normalizedDepth, logger, shouldIgnore, bodyText ?? undefined);
+  const response = await buildPropfindResponse(createDataLoaderAdapter(persist), urlPath, segments, normalizedDepth, logger, shouldIgnore, bodyText ?? undefined);
   return { response };
 }
 
 import type { PersistAdapter, Stat } from "../persist/types";
+import { createDataLoaderAdapter } from "../persist/dataloader-adapter";
 import type { WebDAVLogger } from "../../logging/webdav-logger";
 import type { DavResponse } from "../../webdav/handlers/types";
 
@@ -123,7 +124,7 @@ async function buildPropfindResponse(
       "D:getetag",
     ];
   }
-  function renderProps(name: string, st: Stat, keys: string[] | null, propnameOnly: boolean): string {
+  function renderPropBlocks(name: string, st: Stat, keys: string[] | null, propnameOnly: boolean): { ok: string; nf: string } {
     const map: Record<string, string> = {
       "D:displayname": name,
       "D:getcontentlength": String(st.size ?? 0),
@@ -132,34 +133,50 @@ async function buildPropfindResponse(
       "D:getetag": computeEtag(st),
     };
     const selected = keys ? keys : defaultKeys();
-    const out: string[] = [];
+    const ok: string[] = [];
+    const nf: string[] = [];
     for (const k of selected) {
-      const val = map[k] ?? "";
+      const has = Object.prototype.hasOwnProperty.call(map, k);
+      if (!has) {
+        nf.push(`<${k}/>`);
+        continue;
+      }
       if (propnameOnly) {
-        out.push(`<${k}/>\n`);
+        ok.push(`<${k}/>`);
       } else if (k === "D:resourcetype") {
-        out.push(`<D:resourcetype>${val}</D:resourcetype>`);
+        ok.push(`<D:resourcetype>${map[k]}</D:resourcetype>`);
       } else {
-        out.push(`<${k}>${val}</${k}>`);
+        ok.push(`<${k}>${map[k]}</${k}>`);
       }
     }
-    return out.join("\n      ");
+    return { ok: ok.join("\n      "), nf: nf.join("\n      ") };
   }
   const selfName = parts[parts.length - 1] ?? "/";
-  const selfEntryProps = (() => {
-    if (mode.mode === "propname") { return renderProps(selfName, stat, defaultKeys(), true); }
-    if (mode.mode === "prop") { return renderProps(selfName, stat, mode.keys, false); }
-    return renderProps(selfName, stat, null, false);
-  })();
-  const selfEntry = `\n<D:response>\n  <D:href>${selfHref}</D:href>\n  <D:propstat>\n    <D:prop>\n      ${selfEntryProps}\n    </D:prop>\n    <D:status>HTTP/1.1 200 OK</D:status>\n  </D:propstat>\n</D:response>`;
+  function blocksFor(name: string, st: Stat): { ok: string; nf: string } {
+    if (mode.mode === "propname") {
+      return renderPropBlocks(name, st, defaultKeys(), true);
+    }
+    if (mode.mode === "prop") {
+      return renderPropBlocks(name, st, mode.keys, false);
+    }
+    return renderPropBlocks(name, st, null, false);
+  }
+  const selfBlocks = blocksFor(selfName, stat);
+  const selfOk = `\n  <D:propstat>\n    <D:prop>\n      ${selfBlocks.ok}\n    </D:prop>\n    <D:status>HTTP/1.1 200 OK</D:status>\n  </D:propstat>`;
+  function nfBlock(content: string): string {
+    if (content && content.trim().length > 0) {
+      return `\n  <D:propstat>\n    <D:prop>\n      ${content}\n    </D:prop>\n    <D:status>HTTP/1.1 404 Not Found</D:status>\n  </D:propstat>`;
+    }
+    return "";
+  }
+  const selfNf = nfBlock(selfBlocks.nf);
+  const selfEntry = `\n<D:response>\n  <D:href>${selfHref}</D:href>${selfOk}${selfNf}\n</D:response>`;
   function pushEntry(parentHref: string, name: string, st: Stat) {
     const childIsDir = st.type === "dir";
-    const childProps = (() => {
-      if (mode.mode === "propname") { return renderProps(name, st, defaultKeys(), true); }
-      if (mode.mode === "prop") { return renderProps(name, st, mode.keys, false); }
-      return renderProps(name, st, null, false);
-    })();
-    entryParts.push(`\n<D:response>\n  <D:href>${parentHref}${encodeURIComponent(name)}${childIsDir ? "/" : ""}</D:href>\n  <D:propstat>\n    <D:prop>\n      ${childProps}\n    </D:prop>\n    <D:status>HTTP/1.1 200 OK</D:status>\n  </D:propstat>\n</D:response>`);
+    const childBlocks = blocksFor(name, st);
+    const okBlock = `\n  <D:propstat>\n    <D:prop>\n      ${childBlocks.ok}\n    </D:prop>\n    <D:status>HTTP/1.1 200 OK</D:status>\n  </D:propstat>`;
+    const nf = nfBlock(childBlocks.nf);
+    entryParts.push(`\n<D:response>\n  <D:href>${parentHref}${encodeURIComponent(name)}${childIsDir ? "/" : ""}</D:href>${okBlock}${nf}\n</D:response>`);
   }
   if (depth !== "0" && isDir) {
     const baseHref = selfHref;

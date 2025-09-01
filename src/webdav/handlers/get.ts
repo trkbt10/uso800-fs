@@ -4,6 +4,7 @@
 import { pathToSegments } from "../../utils/path-utils";
 import type { HandlerOptions, HandlerResult } from "../../webdav/handlers/types";
 import type { WebDavHooks } from "../../webdav/hooks";
+import { mapErrorToDav } from "../errors";
 
 async function runBeforeGetHook(hooks: WebDavHooks | undefined, ctx: { urlPath: string; segments: string[]; persist: HandlerOptions["persist"]; logger?: HandlerOptions["logger"] }) {
   if (!hooks?.beforeGet) { return undefined; }
@@ -52,9 +53,10 @@ export async function handleGetRequest(urlPath: string, options: HandlerOptions)
       const body = bodyParts.join("");
       logger?.logRead(urlPath, 200, body.length);
       return { response: { status: 200, headers: { "Content-Type": "text/html", "Accept-Ranges": "bytes" }, body } };
-    } catch {
-      logger?.logRead(urlPath, 500);
-      return { response: { status: 500 } };
+    } catch (err) {
+      const mapped = mapErrorToDav(err);
+      logger?.logRead(urlPath, mapped.status);
+      return { response: { status: mapped.status } };
     }
   }
 
@@ -75,8 +77,9 @@ export async function handleGetRequest(urlPath: string, options: HandlerOptions)
     const children = await persist.readdir(segments);
     const body = `<html><body><h1>Index of /${segments.join("/")}</h1><ul>${children.map((n) => `<li><a href="${encodeURIComponent(n)}">${n}</a></li>`).join("")}</ul></body></html>`;
     return { response: { status: 200, headers: { "Content-Type": "text/html", "Accept-Ranges": "bytes" }, body } };
-  } catch {
-    logger?.logRead(urlPath, 404);
-    return { response: { status: 404 } };
+  } catch (err) {
+    const mapped = mapErrorToDav(err);
+    logger?.logRead(urlPath, mapped.status);
+    return { response: { status: mapped.status } };
   }
 }
