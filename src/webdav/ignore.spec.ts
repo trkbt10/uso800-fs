@@ -27,4 +27,13 @@ describe("ignore utils", () => {
     expect(names).toContain("a.txt");
     expect(names).not.toContain("b.tmp");
   });
+
+  it("quick-ignore catches common OS metadata filenames", () => {
+    const res = buildIgnoreRegexps();
+    const isIgnored = isIgnoredFactory(res);
+    expect(isIgnored("/.AppleDB")).toBe(true);
+    expect(isIgnored("/.TemporaryItems")).toBe(true);
+    expect(isIgnored("/.apDisk")).toBe(true);
+    expect(isIgnored("/._hidden")).toBe(true);
+  });
 });
