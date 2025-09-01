@@ -89,3 +89,28 @@ export const emit_fs_listing: ToolAction<EmitFsListingAction> = {
     return { type: "emit_fs_listing", params: { folder, entries } };
   },
 };
+
+/**
+ * Runtime guard for JSON fallback payloads that resemble emit_fs_listing params.
+ * Validates folder is string[] and each entry is a valid dir/file item.
+ */
+export function isEmitFsListingPayload(x: unknown): x is { folder: string[]; entries: Array<{ kind: "dir" | "file"; name: string; content: string; mime: string }> } {
+  if (typeof x !== "object" || x === null) { return false; }
+  const r = x as Record<string, unknown>;
+  if (!isStringArray(r.folder)) { return false; }
+  const entries = r.entries;
+  if (!Array.isArray(entries)) { return false; }
+  for (const it of entries) {
+    if (typeof it !== "object" || it === null) { return false; }
+    const e = it as Record<string, unknown>;
+    const kind = e.kind;
+    const name = e.name;
+    if (kind !== "dir" && kind !== "file") { return false; }
+    if (typeof name !== "string" || name.length === 0) { return false; }
+    if (kind === "file") {
+      if (typeof e.content !== "string") { return false; }
+      if (typeof e.mime !== "string") { return false; }
+    }
+  }
+  return true;
+}

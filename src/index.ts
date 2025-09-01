@@ -11,6 +11,7 @@ import { createWebDAVLogger } from "./logging/webdav-logger";
 import type { Tracker } from "./logging/tracker";
 // createConsoleTracker is not used; keep Tracker types only.
 import { createUsoFsLLMInstance } from "./llm/fs-llm";
+import type { ImageGenerationProvider, ImageKind, ImageSize } from "./image-generation/types";
 import { createLlmWebDavHooks } from "./llm/webdav-hooks";
 
 /**
@@ -25,6 +26,15 @@ export type AppInitOptions = {
   memoryOnly?: boolean;
   ignore?: string[];
   tracker?: Tracker;
+  image?: {
+    provider: ImageGenerationProvider;
+    repoId: string | number;
+    kind: ImageKind;
+    sizes: ImageSize[];
+    style?: string;
+    negative?: string;
+    n?: number;
+  };
 };
 
 /**
@@ -96,7 +106,25 @@ function createLlm(options: AppInitOptions, persist: PersistAdapter, tracker?: T
     console.log("[uso800fs] LLM enabled with model:", model);
   }
 
-  return createUsoFsLLMInstance(client, { model, instruction, persist, tracker });
+  const image = buildImageConfig(options.image);
+
+  return createUsoFsLLMInstance(client, { model, instruction, persist, tracker, image });
+}
+
+function buildImageConfig(image?: AppInitOptions["image"]) {
+  if (!image) {
+    return undefined;
+  }
+  const { provider, repoId, kind, sizes, style, negative, n } = image;
+  if (!provider || !repoId || !kind || !Array.isArray(sizes) || sizes.length === 0) {
+    throw new Error("image option requires provider, repoId, kind, and at least one size");
+  }
+  return {
+    provider,
+    repoId,
+    kind,
+    request: { sizes, style: style ?? "", negative, n },
+  };
 }
 
 /**
@@ -117,31 +145,30 @@ export function createApp(options: AppInitOptions = {}) {
 
   // Bootstrap: On first boot with LLM enabled, fabricate an initial root listing
   // so the WebDAV client immediately sees content without first navigation.
-  (async () => {
+  async function bootstrapInitialFs() {
     if (!llm) {
       return;
     }
     try {
-      // Ensure root exists and check if empty
       await persist.ensureDir([]);
       const names = await persist.readdir([]).catch(() => [] as string[]);
-      if (names.length === 0) {
-        if (!options.tracker) {
-          console.log("[uso800fs] Bootstrapping initial filesystem (root)…");
-        }
-        await llm.fabricateListing([], { depth: "1" });
-        const after = await persist.readdir([]).catch(() => [] as string[]);
-        const summary = after.length > 0 ? after.join(", ") : "<none>";
-        if (!options.tracker) {
-          console.log(`[uso800fs] Bootstrap complete. Root items: ${summary}`);
-        }
+      if (names.length !== 0) {
+        return;
+      }
+      if (!options.tracker) {
+        console.log("[uso800fs] Bootstrapping initial filesystem (root)…");
+      }
+      await llm.fabricateListing([], { depth: "1" });
+      const after = await persist.readdir([]).catch(() => [] as string[]);
+      const summary = after.length > 0 ? after.join(", ") : "<none>";
+      if (!options.tracker) {
+        console.log(`[uso800fs] Bootstrap complete. Root items: ${summary}`);
       }
     } catch (e) {
       console.warn("[uso800fs] Bootstrap skipped due to error:", (e as Error)?.message ?? e);
     }
-  })().catch(() => {
-    // Ignore bootstrap unhandled rejections deliberately
-  });
+  }
+  void bootstrapInitialFs();
 
   return makeWebdavApp({ persist, hooks, logger, ignoreGlobs: options.ignore });
 }

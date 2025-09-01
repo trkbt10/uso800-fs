@@ -3,32 +3,20 @@
  */
 import type { PersistAdapter } from "../webdav/persist/types";
 import type { Tracker } from "../logging/tracker";
-import { getOpenAIToolsSpec, normalizeAction, type ToolSpec } from "./actions/tools";
-import { runToolCallStreaming } from "./utils/response-stream";
+// JSON streaming path removed in favor of tool calls
 import type OpenAI from "openai";
 import type { ResponseStreamParams } from "openai/lib/responses/ResponseStream";
 import type { Responses } from "openai/resources/responses/responses";
-import { buildListingPrompt, buildFileContentPrompt } from "./utils/prompt-builder";
+// Orchestrator entry; implementations are split per feature
+import type { ImageGenerationProvider, ImageKind, ImageGenerationRequest, ImageSize } from "../image-generation/types";
+// image processing helpers are externalized
+import type { FsExecDeps } from "./executors/fs-actions";
+import { fabricateListingImpl } from "./orchestrator/fabricate-listing";
+import { fabricateFileImpl } from "./orchestrator/fabricate-file";
 
-const allTools = () => getOpenAIToolsSpec();
-function selectTools(names: string[]): ToolSpec[] {
-  const set = new Set(names);
-  return allTools().filter((t) => set.has(t.name));
-}
+// Tool schema-based JSON output: no tool selection required
 
-function ensureAsyncIterable<T>(x: AsyncIterable<T> | Iterable<T>): AsyncIterable<T> {
-  if (x && typeof (x as AsyncIterable<T>)[Symbol.asyncIterator] === "function") {
-    return x as AsyncIterable<T>;
-  }
-  const it = x as Iterable<T>;
-  return {
-    async *[Symbol.asyncIterator]() {
-      for (const v of it) {
-        yield v;
-      }
-    },
-  };
-}
+// ensureAsyncIterable removed – we operate on AsyncIterable streams explicitly
 
 /**
  * Minimal OpenAI client interface for Responses API.
@@ -56,7 +44,18 @@ function keyOf(parts: string[]): string {
  */
 export function createUsoFsLLMInstance(
   client: OpenAIResponsesClient,
-  args: { model: string; instruction?: string; persist: PersistAdapter; tracker?: Tracker },
+  args: {
+    model: string;
+    instruction?: string;
+    persist: PersistAdapter;
+    tracker?: Tracker;
+    image?: {
+      provider: ImageGenerationProvider;
+      repoId: string | number;
+      kind: ImageKind;
+      request: Omit<ImageGenerationRequest, "sizes"> & { sizes: ImageSize[] };
+    };
+  },
 ) {
   if (!client || !client.responses || typeof client.responses.stream !== "function") {
     throw new Error("client.responses.stream is required");
@@ -66,157 +65,63 @@ export function createUsoFsLLMInstance(
   }
 
   // In-flight coalescing to avoid duplicate LLM runs for the same target
-  const inflight = {
+  const inflight: { listing: Map<string, Promise<void>>; file: Map<string, Promise<string>> } = {
     listing: new Map<string, Promise<void>>(),
-    file: new Map<string, Promise<string>>()
-  } as const;
+    file: new Map<string, Promise<string>>(),
+  };
 
   function withCoalescing<T>(map: Map<string, Promise<T>>, key: string, run: () => Promise<T>): Promise<T> {
     const existing = map.get(key);
     if (existing) {
       return existing;
     }
-    const p = (async () => run())()
-      .finally(() => {
-        map.delete(key);
-      });
+    const p = run().finally(() => {
+      map.delete(key);
+    });
     map.set(key, p);
     return p;
   }
 
-  /**
-   * Requests a fabricated listing under the specified folder using LLM tool-calls.
-   */
+  const execDeps: FsExecDeps = { persist: args.persist, image: args.image };
+
   async function fabricateListing(folderPath: string[], options?: { depth?: string | null }): Promise<void> {
-    const key = `LISTING:${keyOf(folderPath)}:DEPTH:${options?.depth ?? "null"}`;
-    return withCoalescing(inflight.listing, key, async () => {
-    const listingStats: { dirs: number; files: number; bytes: number; dirNames: string[]; fileNames: string[] } = {
-      dirs: 0,
-      files: 0,
-      bytes: 0,
-      dirNames: [],
-      fileNames: [],
-    };
-    // Use the tested prompt builder
-    const promptResult = buildListingPrompt(folderPath, {
-      depth: options?.depth,
-      instruction: args.instruction,
-    });
-    const prompt = promptResult.prompt;
-      
-    const request: ResponseStreamParams = {
-      model: args.model,
-      instructions: args.instruction,
-      input: [{ role: "user", content: prompt }],
-      tools: selectTools(["emit_fs_listing"]),
-      tool_choice: { type: "function", name: "emit_fs_listing" },
-    };
-    // Log LLM start
-    {
-      const displayPath = promptResult.displayPath;
-      const promptPreview = prompt.slice(0, 200);
-      if (args.tracker) {
-        args.tracker.track("llm.start", { context: "fabricateListing", path: displayPath, depth: options?.depth ?? null, model: args.model, promptPreview });
-      }
-    }
-    const stream = await client.responses.stream(request);
-    await runToolCallStreaming<void>(
-      ensureAsyncIterable(stream),
-      ({ name, params }) => {
-        if (!name) { return undefined; }
-        const action = normalizeAction(name, params);
-        if (!action) { return undefined; }
-        if (action.type !== "emit_fs_listing") { return undefined; }
-        const { folder, entries } = action.params as { folder: string[]; entries: Array<{ kind: "dir" | "file"; name: string; content: string; mime: string }> };
-        return (async () => {
-          await args.persist.ensureDir(folder);
-          for (const e of entries) {
-            if (e.kind === "dir") {
-              await args.persist.ensureDir([...folder, e.name]);
-              listingStats.dirs += 1;
-              listingStats.dirNames.push(e.name);
-            } else {
-              await args.persist.ensureDir([...folder]);
-              const data = new TextEncoder().encode(e.content);
-              await args.persist.writeFile([...folder, e.name], data, e.mime);
-              listingStats.files += 1;
-              listingStats.bytes += data.length;
-              listingStats.fileNames.push(e.name);
-            }
-          }
-          return undefined;
-        })();
+    return fabricateListingImpl(
+      {
+        client,
+        model: args.model,
+        instruction: args.instruction,
+        tracker: args.tracker,
+        execDeps,
+        withCoalescing,
+        inflight: inflight.listing,
+        keyOf,
       },
-      { endAfterFirst: true },
+      folderPath,
+      options,
     );
-    {
-      const displayPath = promptResult.displayPath;
-      if (args.tracker) {
-        args.tracker.track("llm.end", { context: "fabricateListing", path: displayPath, stats: listingStats });
-      }
-    }
-    });
   }
 
   /**
    * Requests fabricated file content for the specified path using LLM tool-calls.
    */
   async function fabricateFileContent(pathParts: string[], options?: { mimeHint?: string }): Promise<string> {
-    const key = `FILE:${keyOf(pathParts)}:MIME:${options?.mimeHint ?? ""}`;
-    return withCoalescing(inflight.file, key, async () => {
-    const fileStats: { files: number; bytes: number; fileName?: string } = { files: 0, bytes: 0 };
-    // Use the tested prompt builder
-    const promptResult = buildFileContentPrompt(pathParts, {
-      mimeHint: options?.mimeHint,
-      instruction: args.instruction,
-    });
-    const prompt = promptResult.prompt;
-      
-    const request: ResponseStreamParams = {
-      model: args.model,
-      instructions: args.instruction,
-      input: [{ role: "user", content: prompt }],
-      tools: selectTools(["emit_file_content"]),
-      tool_choice: { type: "function", name: "emit_file_content" },
-    };
-    // Log LLM start
-    {
-      const displayPath = promptResult.displayPath;
-      const promptPreview = prompt.slice(0, 200);
-      if (args.tracker) {
-        args.tracker.track("llm.start", { context: "fabricateFileContent", path: displayPath, mimeHint: options?.mimeHint ?? null, model: args.model, promptPreview });
-      }
-    }
-    const stream = await client.responses.stream(request);
-    const res = await runToolCallStreaming<string>(
-      ensureAsyncIterable(stream),
-      ({ name, params }) => {
-        if (!name) { return undefined; }
-        const action = normalizeAction(name, params);
-        if (!action) { return undefined; }
-        if (action.type !== "emit_file_content") { return undefined; }
-        const { path, content, mime } = action.params as { path: string[]; content: string; mime: string };
-        return (async () => {
-          await args.persist.ensureDir(path.slice(0, -1));
-          const data = new TextEncoder().encode(content);
-          await args.persist.writeFile(path, data, mime);
-          fileStats.files += 1;
-          fileStats.bytes += data.length;
-          fileStats.fileName = path[path.length - 1];
-          return content;
-        })();
+    return fabricateFileImpl(
+      {
+        client,
+        model: args.model,
+        instruction: args.instruction,
+        tracker: args.tracker,
+        execDeps,
+        withCoalescing,
+        inflight: inflight.file,
+        keyOf,
       },
-      { endAfterFirst: true },
+      pathParts,
+      options,
     );
-    {
-      const displayPath = promptResult.displayPath;
-      if (args.tracker) {
-        args.tracker.track("llm.end", { context: "fabricateFileContent", path: displayPath, stats: fileStats });
-      }
-    }
-    return typeof res === "string" ? res : "";
-    });
   }
 
   return { fabricateListing, fabricateFileContent };
 }
+
+// image generation and file write logic lives in executors/fs-actions

@@ -60,8 +60,7 @@ export function buildListingPrompt(
   
   const promptParts = [
     "Fabricate a directory listing for the given folder.",
-    "You MUST call emit_fs_listing exactly once and include at least one directory and one file in 'entries'.",
-    "Avoid any plain text output; only use the function call.",
+    "Use the provided tool to emit the listing (no prose).",
     options?.depth ? `WEBDAV_DEPTH=${options.depth}` : undefined,
     "STYLE_HINTS:\n- " + buildListingStyleHints(folderPath, options?.depth).join("\n- "),
     "REQUEST=" + JSON.stringify({ 
@@ -69,6 +68,7 @@ export function buildListingPrompt(
       folder_array: folderPath,
       note: isRoot ? "This is the root folder, use empty array [] for folder parameter" : undefined
     }),
+    undefined,
   ];
   
   const prompt = promptParts.filter(Boolean).join("\n\n");
@@ -154,21 +154,27 @@ export function buildFileContentPrompt(
   options?: FileContentPromptOptions
 ): FileContentPromptResult {
   const displayPath = segmentsToDisplayPath(pathParts);
+  const filename = pathParts[pathParts.length - 1] ?? "";
+  const ext = filename.split('.').pop()?.toLowerCase();
+  const isImage = (() => {
+    if (typeof options?.mimeHint === 'string') {
+      return options.mimeHint.startsWith('image/');
+    }
+    const known = ["png","jpg","jpeg","gif","webp","svg"] as const;
+    return known.includes((ext ?? "") as typeof known[number]);
+  })();
   
-  const promptParts = [
+  const baseParts = [
     "Fabricate plausible file content for the requested path.",
-    "You MUST call emit_file_content exactly once with appropriate content.",
-    "Keep the content concise but believable. Avoid any plain text output; only use the function call.",
+    "Use the provided tools for file creation (no prose).",
+    isImage ? "Prefer the image file tool for image types." : "Prefer the text file tool for non-image types.",
     options?.mimeHint ? `MIME_HINT=${options.mimeHint}` : undefined,
     "STYLE_HINTS:\n- " + buildFileContentStyleHints(pathParts).join("\n- "),
-    "REQUEST=" + JSON.stringify({
-      path: displayPath,
-      path_array: pathParts,
-      filename: pathParts[pathParts.length - 1],
-    }),
+    "REQUEST=" + JSON.stringify({ path: displayPath, path_array: pathParts, filename: pathParts[pathParts.length - 1] }),
   ];
-  
-  const prompt = promptParts.filter(Boolean).join("\n\n");
+  const prompt = baseParts
+    .filter(Boolean)
+    .join("\n\n");
   
   return {
     prompt,

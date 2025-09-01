@@ -1,0 +1,18 @@
+{
+  "candidates": [
+    {
+      "content": {
+        "parts": [
+          { "text": "Absolutely! Here is your nano banana dish with a Gemini theme, presented in a fancy restaurant setting:" },
+          {
+            "inlineData": {
+              "mimeType": "image/png",
+              "data": "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAABmUlEQVQ4T2NkoBAwUqifgRkYGLBgwcI/BIYvX36MZQATo0aNQv///z8DBgYGLh8+fIAxMTH8D8SgQYMY/P//PwMDA0OoqKho0aLFQJw7dy5gYGA4fvz4H8SgQYMYv379GQYGBl6/fh2BgYHh5cuXMQbEwMCgQYMY8+fPZ2BgYFj///9nYGBg+Pfv30EwMDD4//8/GBoa8evXr4GAgLh9+zZgYGAMTBQUnz59AnD9+/cZGRkZgIYB8f//P0ZGRmD37t0jgIGB4eLFizGDwQCBmZkZb968gYGB4efPn0Ccv38fMGfOnEEwMDCEkZGRgZCQEJg+ffrAF0gkJCSi0aNHA3D+/HnDMGfOnEGQmZmZgA0gPnz4gNOnT2cYpKSkQOjQoQMwZ86cQfD06VNw8uRJQyAgILB//36COHDggFDOyMjIY2Njw9q1a9nY2IhDhw5hYWEh1NHR0bCzswNz5syBsLAwQycnJ8PU1BSwZs2aYVhYGEQ3btwYIyMjQ9q2bSswMDBA8+fPB0NDQ8PGxgZbtmwB5ubmMGXKFEOnTp1gZ2fHcO7cOQwPDw9YtGgRLC4uhrCwsGBsbIxhY2OjQ05OTjh16hTg4+OD2bNnQ2ZmJvD27VuMjIwMiI2NjeHIkSPY2NgYxMTEgLi4OKCsrAwQbQAA4gGiuTQF6l8AAAAASUVORK5CYII="
+            }
+          }
+        ]
+      }
+    }
+  ]
+}
+

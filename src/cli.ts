@@ -4,6 +4,7 @@
  */
 import { serve } from "@hono/node-server";
 import createApp from "./index";
+import { loadConfigFile, mergeConfigWithCli } from "./cli.config";
 import { pathToFileURL } from "node:url";
 import { createTrackStore } from "./ink/store";
 import { runInkUI } from "./ink/ui";
@@ -45,54 +46,51 @@ ENVIRONMENT VARIABLES:
 `);
 }
 
-function parseCli(argv: string[]) {
-  const out: { port?: number; state?: string; model?: string; instruction?: string; persistRoot?: string; ignore?: string[]; ui?: boolean; help?: boolean } = {};
-  
-  for (let i = 0; i < argv.length; i += 1) {
-    const a = argv[i];
+function parseCli(
+  argv: string[],
+): { port?: number; state?: string; model?: string; instruction?: string; persistRoot?: string; ignore?: string[]; ui?: boolean; help?: boolean } {
+  function step(
+    args: string[],
+    acc: { port?: number; state?: string; model?: string; instruction?: string; persistRoot?: string; ignore?: string[]; ui?: boolean; help?: boolean },
+  ): { port?: number; state?: string; model?: string; instruction?: string; persistRoot?: string; ignore?: string[]; ui?: boolean; help?: boolean } {
+    if (args.length === 0) {
+      return acc;
+    }
+    const [a, ...rest] = args;
     if (a === "-h" || a === "--help") {
-      out.help = true;
-      return out;
-    }
-    if (a === "--port") {
-      out.port = Number(argv[i + 1]);
-      i += 1;
-      continue;
-    }
-    if (a === "--state") {
-      out.state = argv[i + 1];
-      i += 1;
-      continue;
-    }
-    if (a === "--model") {
-      out.model = argv[i + 1];
-      i += 1;
-      continue;
-    }
-    if (a === "--instruction") {
-      out.instruction = argv[i + 1];
-      i += 1;
-      continue;
-    }
-    if (a === "--persist-root") {
-      out.persistRoot = argv[i + 1];
-      i += 1;
-      continue;
-    }
-    if (a === "--ignore") {
-      const pat = argv[i + 1];
-      if (typeof pat === "string" && pat.length > 0) {
-        out.ignore = [...(out.ignore ?? []), pat];
-      }
-      i += 1;
-      continue;
+      return { ...acc, help: true };
     }
     if (a === "--ui") {
-      out.ui = true;
-      continue;
+      return step(rest, { ...acc, ui: true });
     }
+    function withNext(cb: (v: string) => { port?: number; state?: string; model?: string; instruction?: string; persistRoot?: string; ignore?: string[]; ui?: boolean; help?: boolean }) {
+      if (rest.length === 0) {
+        return acc;
+      }
+      const [v, ...rest2] = rest;
+      return step(rest2, cb(v));
+    }
+    if (a === "--port") {
+      return withNext((v) => ({ ...acc, port: Number(v) }));
+    }
+    if (a === "--state") {
+      return withNext((v) => ({ ...acc, state: v }));
+    }
+    if (a === "--model") {
+      return withNext((v) => ({ ...acc, model: v }));
+    }
+    if (a === "--instruction") {
+      return withNext((v) => ({ ...acc, instruction: v }));
+    }
+    if (a === "--persist-root") {
+      return withNext((v) => ({ ...acc, persistRoot: v }));
+    }
+    if (a === "--ignore") {
+      return withNext((v) => ({ ...acc, ignore: [...(acc.ignore ?? []), v] }));
+    }
+    return step(rest, acc);
   }
-  return out;
+  return step(argv, {});
 }
 
 type AppWithPortAndTracker = {
@@ -132,19 +130,30 @@ export function startFromCli(): AppWithPortAndTracker {
     }, 0);
   }
 
-  const app = createApp({
+  const cfg = loadConfigFile();
+  const merged = mergeConfigWithCli(cfg, {
+    port: args.port,
     state: args.state,
     persistRoot: args.persistRoot,
     model: args.model,
     instruction: args.instruction,
     ignore: args.ignore,
+    ui: args.ui,
+  });
+  const app = createApp({
+    ...merged.app,
     tracker,
   });
   const maybeApp = app as HonoLike;
   if (!hasFetcher(maybeApp)) {
     throw new Error("Hono app is missing fetch");
   }
-  const port = typeof args.port === "number" && !Number.isNaN(args.port) ? args.port : 8787;
+  const chosen = ((): number => {
+    if (typeof merged.port === "number" && !Number.isNaN(merged.port)) { return merged.port; }
+    if (typeof args.port === "number" && !Number.isNaN(args.port)) { return args.port; }
+    return 8787;
+  })();
+  const port = chosen;
   return { ...maybeApp, port, tracker } as AppWithPortAndTracker;
 }
 
@@ -165,7 +174,9 @@ if (import.meta && typeof import.meta.url === "string") {
     const appWithPort = startFromCli();
     serve({ fetch: appWithPort.fetch.bind(appWithPort), port: appWithPort.port, hostname: "127.0.0.1" });
     const args = parseCli(process.argv.slice(2));
-    if (args.ui) {
+    const cfg = loadConfigFile();
+    const merged = mergeConfigWithCli(cfg, args);
+    if (merged.ui ?? args.ui) {
       // If UI mode, track the port info using the tracker from startFromCli
       if (appWithPort.tracker) {
         appWithPort.tracker.track("app.port", { host: "127.0.0.1", port: appWithPort.port });

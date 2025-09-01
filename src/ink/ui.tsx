@@ -144,7 +144,7 @@ function ActivityLine({ event, index }: { event: TrackEvent; index: number }) {
   const isPut = event.channel === "webdav" && p.method === "PUT";
   const isMkcol = event.channel === "webdav" && p.method === "MKCOL";
   
-  const style = (() => {
+  function deriveStyle() {
     if (isLLMCreated) { return { icon: "🤖", action: "CREATE", color: "magenta", actionColor: "magenta" }; }
     if (isMkcol || isMkdir) { return { icon: "📁", action: "MKDIR", color: "blue", actionColor: "blue" }; }
     if (isPut || isWrite) { return { icon: "✏️", action: "WRITE", color: "green", actionColor: "green" }; }
@@ -152,7 +152,8 @@ function ActivityLine({ event, index }: { event: TrackEvent; index: number }) {
     if (isDelete) { return { icon: "🗑", action: "DELETE", color: "red", actionColor: "red" }; }
     if (isPropfind) { return { icon: "🔍", action: "LIST", color: "yellow", actionColor: "yellow" }; }
     return { icon: "•", action: "", color: "gray", actionColor: "white" };
-  })();
+  }
+  const style = deriveStyle();
 
   if (!style.action) {
     return null;
@@ -199,16 +200,20 @@ export function InkApp({ store }: { store: Store }) {
   // FS events are summarized in the activity panel; no top-panel rendering.
   
   // Activity events for the bottom panel
+  function isKnownWebDav(e: TrackEvent, p: Record<string, unknown>): boolean {
+    if (e.channel !== "webdav") { return false; }
+    if (typeof p.method !== "string") { return false; }
+    const known = new Set(["MKCOL", "PUT", "GET", "PROPFIND", "DELETE"]);
+    return known.has(p.method);
+  }
   const activityEvents = events.filter((e: TrackEvent) => {
     const p = (e.payload ?? {}) as Record<string, unknown>;
     const isLlmCreate = e.channel === "llm.end" ? (p.context === "fabricateFileContent") : false;
-    const isHttpKnown = (() => {
-      if (e.channel !== "webdav") { return false; }
-      if (typeof p.method !== "string") { return false; }
-      return ["MKCOL", "PUT", "GET", "PROPFIND", "DELETE"].includes(p.method);
-    })();
+    const isHttpKnown = isKnownWebDav(e, p);
     const isFs = e.channel.startsWith("fs.");
-    return isLlmCreate ? true : (isHttpKnown ? true : isFs);
+    if (isLlmCreate) { return true; }
+    if (isHttpKnown) { return true; }
+    return isFs;
   });
   
   // Calculate stats
@@ -223,6 +228,20 @@ export function InkApp({ store }: { store: Store }) {
 
   // Ink gradient component (ESM default import)
   
+  function getModeLabel(): string {
+    const m = persistMode?.mode;
+    if (m === "fs") { return "Persistent"; }
+    if (m === "memory") { return "In-Memory"; }
+    return "Unknown";
+  }
+
+  function renderRootInfo() {
+    if (!persistMode?.root) {
+      return null;
+    }
+    return (<><Text dimColor> | Root: </Text><Text color="blue">{persistMode.root}</Text></>);
+  }
+
   return (
     <Box flexDirection="column">
       {/* Header */}
@@ -256,23 +275,13 @@ export function InkApp({ store }: { store: Store }) {
           <Box flexDirection="column">
             <Box marginBottom={0}>
               <Text color="cyan" bold>▸ Mode: </Text>
-              <Text color="white">{(() => { const m = persistMode?.mode; if (m === "fs") { return "Persistent"; } if (m === "memory") { return "In-Memory"; } return "Unknown"; })()}</Text>
-              {(() => { if (persistMode?.root) { return (<><Text dimColor> | Root: </Text><Text color="blue">{persistMode.root}</Text></>); } return null; })()}
+              <Text color="white">{getModeLabel()}</Text>
+              {renderRootInfo()}
             </Box>
             <Box>
               <Text color="cyan" bold>▸ Server: </Text>
               <Text color="white">{appPort ? `${(appPort.host ?? "127.0.0.1")}:${(appPort.port ?? 8787)}` : "Starting..."}</Text>
-              {(() => {
-                if (llmModel?.model) {
-                  return (
-                    <>
-                      <Text dimColor> | LLM: </Text>
-                      <Text color="magenta">{llmModel.model}</Text>
-                    </>
-                  );
-                }
-                return null;
-              })()}
+              {llmModel?.model ? (<><Text dimColor> | LLM: </Text><Text color="magenta">{llmModel.model}</Text></>) : null}
             </Box>
           </Box>
         </Box>

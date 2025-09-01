@@ -9,22 +9,28 @@ describe("fs-llm with PersistAdapter", () => {
   describe("createUsoFsLLMInstance", () => {
     it("creates instance with valid inputs", () => {
       const mockClient = {
-        responses: { 
+        responses: {
           stream: async () => {
             return (async function* (): AsyncGenerator<Responses.ResponseStreamEvent> {
-              const ev: Responses.ResponseFunctionCallArgumentsDoneEvent = {
-                type: "response.function_call_arguments.done",
-                item_id: "test",
+              const delta: Responses.ResponseTextDeltaEvent = {
+                type: "response.output_text.delta",
+                content_index: 0,
                 output_index: 0,
                 sequence_number: 0,
-                arguments: JSON.stringify({
-                  folder: ["test"],
-                  entries: [
-                    { name: "file.txt", kind: "file", content: "test", mime: "text/plain" }
-                  ]
-                })
+                item_id: "msg1",
+                delta: JSON.stringify({ folder: ["test"], entries: [{ name: "file.txt", kind: "file", content: "test", mime: "text/plain" }] }).slice(0, 20),
+                logprobs: [],
               };
-              yield ev;
+              const done: Responses.ResponseTextDoneEvent = {
+                type: "response.output_text.done",
+                content_index: 0,
+                output_index: 0,
+                sequence_number: 1,
+                item_id: "msg1",
+                text: JSON.stringify({ folder: ["test"], entries: [{ name: "file.txt", kind: "file", content: "test", mime: "text/plain" }] }),
+                logprobs: [],
+              };
+              yield delta; yield done;
             })();
           }
         },
@@ -44,51 +50,33 @@ describe("fs-llm with PersistAdapter", () => {
     it("creates directories and files via PersistAdapter", async () => {
       const persist = createMemoryAdapter();
       const mockStream = (async function* (): AsyncGenerator<Responses.ResponseStreamEvent> {
+        const itemId = "call1";
         const added: Responses.ResponseOutputItemAddedEvent = {
           type: "response.output_item.added",
-          item: { type: "function_call", id: "test", name: "emit_fs_listing", arguments: "", call_id: "c1" },
+          item: {
+            type: "function_call",
+            id: itemId,
+            name: "emit_fs_listing",
+            arguments: "{}",
+            call_id: "c1",
+          },
           output_index: 0,
           sequence_number: 0,
         };
-        const delta: Responses.ResponseFunctionCallArgumentsDeltaEvent = {
-          type: "response.function_call_arguments.delta",
-          item_id: "test",
+        const argsDone: Responses.ResponseFunctionCallArgumentsDoneEvent = {
+          type: "response.function_call_arguments.done",
+          item_id: itemId,
           output_index: 0,
           sequence_number: 1,
-          delta: JSON.stringify({
-            folder: ["test"],
-            entries: [
-              { name: "dir1", kind: "dir", content: "", mime: "" },
-              { name: "file.txt", kind: "file", content: "content", mime: "text/plain" }
-            ]
-          })
-        };
-        const done: Responses.ResponseFunctionCallArgumentsDoneEvent = {
-          type: "response.function_call_arguments.done",
-          item_id: "test",
-          output_index: 0,
-          sequence_number: 2,
           arguments: JSON.stringify({
             folder: ["test"],
             entries: [
               { name: "dir1", kind: "dir", content: "", mime: "" },
-              { name: "file.txt", kind: "file", content: "content", mime: "text/plain" }
-            ]
-          })
+              { name: "file.txt", kind: "file", content: "content", mime: "text/plain" },
+            ],
+          }),
         };
-        const finished: Responses.ResponseOutputItemDoneEvent = {
-          type: "response.output_item.done",
-          item: { type: "function_call", id: "test", name: "emit_fs_listing", call_id: "c1", arguments: JSON.stringify({
-            folder: ["test"],
-            entries: [
-              { name: "dir1", kind: "dir", content: "", mime: "" },
-              { name: "file.txt", kind: "file", content: "content", mime: "text/plain" }
-            ]
-          }) },
-          output_index: 0,
-          sequence_number: 3,
-        };
-        yield added; yield delta; yield done; yield finished;
+        yield added; yield argsDone;
       })();
 
       const mockClient: OpenAIResponsesClient = { responses: { stream: async () => mockStream } };
@@ -113,45 +101,21 @@ describe("fs-llm with PersistAdapter", () => {
     it("creates file with content via PersistAdapter", async () => {
       const persist = createMemoryAdapter();
       const mockStream = (async function* (): AsyncGenerator<Responses.ResponseStreamEvent> {
+        const itemId = "call1";
         const added: Responses.ResponseOutputItemAddedEvent = {
           type: "response.output_item.added",
-          item: { type: "function_call", id: "test", name: "emit_file_content", arguments: "", call_id: "c1" },
+          item: { type: "function_call", id: itemId, name: "emit_file_content", arguments: "{}", call_id: "c1" },
           output_index: 0,
           sequence_number: 0,
         };
-        const delta: Responses.ResponseFunctionCallArgumentsDeltaEvent = {
-          type: "response.function_call_arguments.delta",
-          item_id: "test",
+        const argsDone: Responses.ResponseFunctionCallArgumentsDoneEvent = {
+          type: "response.function_call_arguments.done",
+          item_id: itemId,
           output_index: 0,
           sequence_number: 1,
-          delta: JSON.stringify({
-            path: ["test.txt"],
-            content: "Generated content",
-            mime: "text/plain"
-          })
+          arguments: JSON.stringify({ path: ["test.txt"], content: "Generated content", mime: "text/plain" }),
         };
-        const done: Responses.ResponseFunctionCallArgumentsDoneEvent = {
-          type: "response.function_call_arguments.done",
-          item_id: "test",
-          output_index: 0,
-          sequence_number: 2,
-          arguments: JSON.stringify({
-            path: ["test.txt"],
-            content: "Generated content",
-            mime: "text/plain"
-          })
-        };
-        const finished: Responses.ResponseOutputItemDoneEvent = {
-          type: "response.output_item.done",
-          item: { type: "function_call", id: "test", name: "emit_file_content", call_id: "c1", arguments: JSON.stringify({
-            path: ["test.txt"],
-            content: "Generated content",
-            mime: "text/plain"
-          }) },
-          output_index: 0,
-          sequence_number: 3,
-        };
-        yield added; yield delta; yield done; yield finished;
+        yield added; yield argsDone;
       })();
 
       const mockClient: OpenAIResponsesClient = { responses: { stream: async () => mockStream } };

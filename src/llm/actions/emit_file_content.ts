@@ -55,3 +55,15 @@ export const emit_file_content: ToolAction<EmitFileContentAction> = {
     return { type: "emit_file_content", params: { path, content, mime } };
   },
 };
+
+/**
+ * Runtime guard for JSON fallback payloads that resemble emit_file_content params.
+ */
+export function isEmitTextFilePayload(x: unknown): x is { path: string[]; content: string; mime: string } {
+  if (typeof x !== "object" || x === null) { return false; }
+  const r = x as Record<string, unknown>;
+  if (!isStringArray(r.path)) { return false; }
+  if (typeof r.content !== "string") { return false; }
+  if (typeof r.mime !== "string") { return false; }
+  return true;
+}
