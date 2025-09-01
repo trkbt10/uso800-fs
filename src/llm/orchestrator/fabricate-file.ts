@@ -36,7 +36,12 @@ export async function fabricateFileImpl(
   return deps.withCoalescing(deps.inflight, key, async () => {
     const stats: { files: number; bytes: number; fileName?: string } = { files: 0, bytes: 0 };
 
-    const promptResult = buildFileContentPrompt(pathParts, { mimeHint: options?.mimeHint, instruction: deps.instruction });
+    const promptResult = buildFileContentPrompt(pathParts, { 
+      mimeHint: options?.mimeHint, 
+      instruction: deps.instruction,
+      textInstruction: deps.textInstruction,
+      imageInstruction: deps.imageInstruction
+    });
     const prompt = promptResult.prompt;
 
     const request: ResponseStreamParams = {

@@ -10,6 +10,8 @@ import { isRootPath, segmentsToDisplayPath } from "./path-utils";
 export type ListingPromptOptions = {
   depth?: string | null;
   instruction?: string;
+  textInstruction?: string;
+  imageInstruction?: string;
 };
 
 /**
@@ -62,6 +64,8 @@ export function buildListingPrompt(
     "Fabricate a directory listing for the given folder.",
     "Use the provided tool to emit the listing (no prose).",
     options?.depth ? `WEBDAV_DEPTH=${options.depth}` : undefined,
+    options?.textInstruction ? `TEXT_GENERATION_STYLE: ${options.textInstruction}` : undefined,
+    options?.imageInstruction ? `IMAGE_GENERATION_STYLE: ${options.imageInstruction}` : undefined,
     "STYLE_HINTS:\n- " + buildListingStyleHints(folderPath, options?.depth).join("\n- "),
     "REQUEST=" + JSON.stringify({ 
       path: displayPath,
@@ -86,6 +90,8 @@ export function buildListingPrompt(
 export type FileContentPromptOptions = {
   mimeHint?: string | null;
   instruction?: string;
+  textInstruction?: string;
+  imageInstruction?: string;
 };
 
 /**
@@ -169,6 +175,8 @@ export function buildFileContentPrompt(
     "Use the provided tools for file creation (no prose).",
     isImage ? "Prefer the image file tool for image types." : "Prefer the text file tool for non-image types.",
     options?.mimeHint ? `MIME_HINT=${options.mimeHint}` : undefined,
+    !isImage && options?.textInstruction ? `TEXT_GENERATION_STYLE: ${options.textInstruction}` : undefined,
+    isImage && options?.imageInstruction ? `IMAGE_GENERATION_STYLE: ${options.imageInstruction}` : undefined,
     "STYLE_HINTS:\n- " + buildFileContentStyleHints(pathParts).join("\n- "),
     "REQUEST=" + JSON.stringify({ path: displayPath, path_array: pathParts, filename: pathParts[pathParts.length - 1] }),
   ];

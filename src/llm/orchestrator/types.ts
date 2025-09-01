@@ -15,6 +15,8 @@ export type OrchestratorBaseDeps = {
   client: OpenAIResponsesClient;
   model: string;
   instruction?: string;
+  textInstruction?: string;
+  imageInstruction?: string;
   tracker?: Tracker;
   execDeps: FsExecDeps;
   withCoalescing: WithCoalescingFn;

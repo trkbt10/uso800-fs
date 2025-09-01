@@ -42,7 +42,12 @@ export async function fabricateListingImpl(
       fileNames: [],
     };
 
-    const promptResult = buildListingPrompt(folderPath, { depth: options?.depth, instruction: deps.instruction });
+    const promptResult = buildListingPrompt(folderPath, { 
+      depth: options?.depth, 
+      instruction: deps.instruction,
+      textInstruction: deps.textInstruction,
+      imageInstruction: deps.imageInstruction
+    });
     const prompt = promptResult.prompt;
 
     const request: ResponseStreamParams = {

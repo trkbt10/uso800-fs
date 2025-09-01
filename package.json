@@ -44,6 +44,7 @@
     "ajv": "^8.17.1",
     "dataloader": "^2.2.3",
     "hono": "^4.9.5",
-    "ink-gradient": "^3.0.0"
+    "ink-gradient": "^3.0.0",
+    "sharp": "^0.34.3"
   }
 }

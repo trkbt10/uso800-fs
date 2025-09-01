@@ -47,6 +47,8 @@ export function createUsoFsLLMInstance(
   args: {
     model: string;
     instruction?: string;
+    textInstruction?: string;
+    imageInstruction?: string;
     persist: PersistAdapter;
     tracker?: Tracker;
     image?: {
@@ -90,6 +92,8 @@ export function createUsoFsLLMInstance(
         client,
         model: args.model,
         instruction: args.instruction,
+        textInstruction: args.textInstruction,
+        imageInstruction: args.imageInstruction,
         tracker: args.tracker,
         execDeps,
         withCoalescing,
@@ -110,6 +114,8 @@ export function createUsoFsLLMInstance(
         client,
         model: args.model,
         instruction: args.instruction,
+        textInstruction: args.textInstruction,
+        imageInstruction: args.imageInstruction,
         tracker: args.tracker,
         execDeps,
         withCoalescing,

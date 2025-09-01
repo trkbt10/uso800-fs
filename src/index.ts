@@ -21,6 +21,8 @@ export type AppInitOptions = {
   apiKey?: string;
   model?: string;
   instruction?: string;
+  textInstruction?: string;
+  imageInstruction?: string;
   persistRoot?: string;
   state?: string; // For backwards compatibility (ignored)
   memoryOnly?: boolean;
@@ -79,6 +81,8 @@ function createLlm(options: AppInitOptions, persist: PersistAdapter, tracker?: T
   const apiKey = options.apiKey ?? process.env.OPENAI_API_KEY;
   const model = options.model ?? process.env.OPENAI_MODEL;
   const instruction = buildAbsurdInstruction(options.instruction);
+  const textInstruction = options.textInstruction;
+  const imageInstruction = options.imageInstruction;
 
   if (!apiKey || !model) {
     return null;
@@ -108,7 +112,15 @@ function createLlm(options: AppInitOptions, persist: PersistAdapter, tracker?: T
 
   const image = buildImageConfig(options.image);
 
-  return createUsoFsLLMInstance(client, { model, instruction, persist, tracker, image });
+  return createUsoFsLLMInstance(client, { 
+    model, 
+    instruction, 
+    textInstruction,
+    imageInstruction,
+    persist, 
+    tracker, 
+    image 
+  });
 }
 
 function buildImageConfig(image?: AppInitOptions["image"]) {
