@@ -5,6 +5,7 @@ import { pathToSegments } from "../../utils/path-utils";
 import type { HandlerOptions, HandlerResult } from "../../webdav/handlers/types";
 import type { WebDavHooks } from "../../webdav/hooks";
 import { mapErrorToDav } from "../errors";
+import { applyOrder } from "../order";
 
 async function runBeforeGetHook(hooks: WebDavHooks | undefined, ctx: { urlPath: string; segments: string[]; persist: HandlerOptions["persist"]; logger?: HandlerOptions["logger"] }) {
   if (!hooks?.beforeGet) { return undefined; }
@@ -42,7 +43,9 @@ export async function handleGetRequest(urlPath: string, options: HandlerOptions)
         return { response: { status: 200, headers: { "Content-Type": contentType, "Accept-Ranges": "bytes", "Content-Length": String(content.length), ...(stat.mtime ? { "Last-Modified": stat.mtime } : {}), ...(etag ? { ETag: etag } : {}) }, body: content } };
       }
       // Directory listing
-      const children = await persist.readdir(segments);
+      const childrenRaw = await persist.readdir(segments);
+      const dirUrl = urlPath.endsWith("/") ? urlPath.slice(0, -1) : urlPath;
+      const children = await applyOrder(persist, dirUrl, childrenRaw);
       const bodyParts = [`<html><body><h1>Index of /${segments.join("/")}</h1><ul>`];
       for (const name of children) {
         const st = await persist.stat([...segments, name]).catch(() => null);

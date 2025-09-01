@@ -29,6 +29,10 @@ import { checkDepthInfinityRequiredForDir, etagMatchesIfHeader, requireLockOk } 
 import { maybeIgnored } from "./ignore-guards";
 import { toResponse } from "./response";
 import { parseMkcolProps } from "./xml/mkcol-parse";
+import { isMethodAllowed } from "./acl";
+import { handleSearchRequest } from "./handlers/search";
+import { handleReportRequest } from "./handlers/report";
+import { handleOrderpatchRequest } from "./handlers/orderpatch";
 
 /**
  * Creates a Hono-based WebDAV app using the provided PersistAdapter.
@@ -102,6 +106,9 @@ export function makeWebdavApp(opts: {
     if (ignored) {
       return ignored;
     }
+    if (!(await isMethodAllowed(basePersist, c.req.path, "GET"))) {
+      return send(c, { status: 403 });
+    }
     const p = c.req.path;
     const persist = basePersist;
     const hdrs: Record<string, string> = {};
@@ -117,6 +124,9 @@ export function makeWebdavApp(opts: {
     if (ignored) {
       return ignored;
     }
+    if (!(await isMethodAllowed(basePersist, c.req.path, "HEAD"))) {
+      return send(c, { status: 403 });
+    }
     const p = c.req.path;
     const persist = basePersist;
     const result = await handleHeadRequest(p, { persist, logger });
@@ -128,6 +138,9 @@ export function makeWebdavApp(opts: {
     const ignored = maybeIgnore(c, "PUT");
     if (ignored) {
       return ignored;
+    }
+    if (!(await isMethodAllowed(basePersist, p, "PUT"))) {
+      return send(c, { status: 403 });
     }
     const persist = basePersist;
     // Partial writes via Content-Range not implemented (explicit 501)
@@ -148,6 +161,9 @@ export function makeWebdavApp(opts: {
     logger.logInput("DELETE", c.req.path);
     const p = c.req.path;
     const persist = basePersist;
+    if (!(await isMethodAllowed(basePersist, p, "DELETE"))) {
+      return send(c, { status: 403 });
+    }
     const ok = await requireLockOk(davState, p, c.req.raw.headers, "Lock-Token");
     if (!ok) { return send(c, { status: 423 }); }
     const etagOk = await etagMatchesIfHeader(basePersist, p, c.req.raw.headers);
@@ -161,6 +177,9 @@ export function makeWebdavApp(opts: {
     const p = c.req.path;
 
     if (method === "PROPFIND") {
+      if (!(await isMethodAllowed(basePersist, p, "PROPFIND"))) {
+        return send(c, { status: 403 });
+      }
       const depth = c.req.header("Depth") ?? null;
       if (isIgnored(p)) {
         logger.logOutput("PROPFIND", p, 404);
@@ -186,6 +205,9 @@ export function makeWebdavApp(opts: {
     }
 
     if (method === "MKCOL") {
+      if (!(await isMethodAllowed(basePersist, p, "MKCOL"))) {
+        return send(c, { status: 403 });
+      }
       if (isIgnored(p)) {
         logger.logOutput("MKCOL", p, 404);
         return send(c, { status: 404 });
@@ -209,12 +231,27 @@ export function makeWebdavApp(opts: {
       return send(c, result.response);
     }
 
+    if (method === "SEARCH") {
+      if (!(await isMethodAllowed(basePersist, p, "SEARCH"))) {
+        return send(c, { status: 403 });
+      }
+      const body = await c.req.text().then((t) => t).catch(() => "");
+      const res = await handleSearchRequest(p, { persist: basePersist, logger }, body);
+      return send(c, res.response);
+    }
+
     if (method === "LOCK") {
+      if (!(await isMethodAllowed(basePersist, p, "LOCK"))) {
+        return send(c, { status: 403 });
+      }
       const result = await handleLockRequest(p, { persist: basePersist, logger });
       return send(c, result.response);
     }
 
     if (method === "UNLOCK") {
+      if (!(await isMethodAllowed(basePersist, p, "UNLOCK"))) {
+        return send(c, { status: 403 });
+      }
       const sent = c.req.header("Lock-Token") ?? "";
       const token = sent ? sent : undefined;
       const result = await handleUnlockRequest(p, token, { persist: basePersist, logger });
@@ -222,6 +259,9 @@ export function makeWebdavApp(opts: {
     }
 
     if (method === "PROPPATCH") {
+      if (!(await isMethodAllowed(basePersist, p, "PROPPATCH"))) {
+        return send(c, { status: 403 });
+      }
       const body = await c.req.text();
       const ok = await requireLockOk(davState, p, c.req.raw.headers, "Lock-Token");
       if (!ok) { return send(c, { status: 423 }); }
@@ -232,6 +272,9 @@ export function makeWebdavApp(opts: {
     }
 
     if (method === "COPY" || method === "MOVE") {
+      if (!(await isMethodAllowed(basePersist, p, method))) {
+        return send(c, { status: 403 });
+      }
       const destination = c.req.header("Destination");
       if (!destination) { return send(c, { status: 400 }); }
       const overwrite = (c.req.header("Overwrite") ?? "T").toUpperCase() !== "F";
@@ -250,6 +293,64 @@ export function makeWebdavApp(opts: {
       }
       const copied = await handleCopyRequest(p, destUrl.pathname, { persist, logger, overwrite });
       return send(c, copied.response);
+    }
+
+    if (method === "BIND") {
+      if (!(await isMethodAllowed(basePersist, p, "BIND"))) {
+        return send(c, { status: 403 });
+      }
+      const srcHeader = c.req.header("Source");
+      if (!srcHeader) { return send(c, { status: 400 }); }
+      const overwrite = (c.req.header("Overwrite") ?? "T").toUpperCase() !== "F";
+      const srcUrl = new URL(srcHeader);
+      const okDepth = await checkDepthInfinityRequiredForDir(basePersist, srcUrl.pathname, () => c.req.header("Depth"));
+      if (!okDepth) { return send(c, { status: 400 }); }
+      const copied = await handleCopyRequest(srcUrl.pathname, p, { persist: basePersist, logger, overwrite });
+      return send(c, copied.response);
+    }
+
+    if (method === "UNBIND") {
+      if (!(await isMethodAllowed(basePersist, p, "UNBIND"))) {
+        return send(c, { status: 403 });
+      }
+      const ok = await requireLockOk(davState, p, c.req.raw.headers, "Lock-Token");
+      if (!ok) { return send(c, { status: 423 }); }
+      const etagOk = await etagMatchesIfHeader(basePersist, p, c.req.raw.headers);
+      if (!etagOk) { return send(c, { status: 412 }); }
+      const result = await handleDeleteRequest(p, { persist: basePersist, logger });
+      return send(c, result.response);
+    }
+
+    if (method === "REBIND") {
+      if (!(await isMethodAllowed(basePersist, p, "REBIND"))) {
+        return send(c, { status: 403 });
+      }
+      const destination = c.req.header("Destination");
+      if (!destination) { return send(c, { status: 400 }); }
+      const overwrite = (c.req.header("Overwrite") ?? "T").toUpperCase() !== "F";
+      const destUrl = new URL(destination);
+      const okDepth = await checkDepthInfinityRequiredForDir(basePersist, p, () => c.req.header("Depth"));
+      if (!okDepth) { return send(c, { status: 400 }); }
+      const moved = await handleMoveRequest(p, destUrl.pathname, { persist: basePersist, logger, overwrite });
+      return send(c, moved.response);
+    }
+
+    if (method === "REPORT") {
+      if (!(await isMethodAllowed(basePersist, p, "REPORT"))) {
+        return send(c, { status: 403 });
+      }
+      const body = await c.req.text().then((t) => t).catch(() => "");
+      const res = await handleReportRequest(p, { persist: basePersist, logger }, body);
+      return send(c, res.response);
+    }
+
+    if (method === "ORDERPATCH") {
+      if (!(await isMethodAllowed(basePersist, p, "ORDERPATCH"))) {
+        return send(c, { status: 403 });
+      }
+      const body = await c.req.text().then((t) => t).catch(() => "");
+      const res = await handleOrderpatchRequest(p, body, { persist: basePersist, logger });
+      return send(c, res.response);
     }
 
     await next();

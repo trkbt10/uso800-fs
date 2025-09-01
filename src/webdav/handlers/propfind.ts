@@ -60,6 +60,9 @@ import type { PersistAdapter, Stat } from "../persist/types";
 import { createDataLoaderAdapter } from "../persist/dataloader-adapter";
 import type { WebDAVLogger } from "../../logging/webdav-logger";
 import type { DavResponse } from "../../webdav/handlers/types";
+import { applyOrder } from "../order";
+import { computeUsedBytes } from "../utils/usage";
+import { getQuotaLimitBytes } from "../quota";
 
 async function statOrNull(persist: PersistAdapter, path: string[]): Promise<Stat | null> {
   try { return await persist.stat(path); } catch { return null; }
@@ -104,12 +107,13 @@ async function buildPropfindResponse(
   shouldIgnore?: (fullPath: string, baseName: string) => boolean,
   bodyText?: string,
 ): Promise<DavResponse> {
+  const p = createDataLoaderAdapter(persist);
   const exists = await persist.exists(parts);
   if (!exists) {
     logger?.logList(urlPath, 404);
     return { status: 404 };
   }
-  const stat = await persist.stat(parts);
+  const stat = await p.stat(parts);
   const isDir = stat.type === "dir";
   const selfHref = urlPath.endsWith("/") ? urlPath : urlPath + "/";
   const entryParts: string[] = [];
@@ -124,7 +128,9 @@ async function buildPropfindResponse(
       "D:getetag",
     ];
   }
-  function renderPropBlocks(name: string, st: Stat, keys: string[] | null, propnameOnly: boolean): { ok: string; nf: string } {
+  async function computeUsedBytesLocal(path: string[]): Promise<number> { return await computeUsedBytes(p, path); }
+
+  async function renderPropBlocks(name: string, path: string[], st: Stat, keys: string[] | null, propnameOnly: boolean): Promise<{ ok: string; nf: string }> {
     const map: Record<string, string> = {
       "D:displayname": name,
       "D:getcontentlength": String(st.size ?? 0),
@@ -138,6 +144,24 @@ async function buildPropfindResponse(
     for (const k of selected) {
       const has = Object.prototype.hasOwnProperty.call(map, k);
       if (!has) {
+        if (k === "D:quota-used-bytes") {
+          const used = await computeUsedBytesLocal(path);
+          ok.push(`<D:quota-used-bytes>${String(used)}</D:quota-used-bytes>`);
+          continue;
+        }
+        if (k === "D:quota-available-bytes") {
+          const limit = await getQuotaLimitBytes(p);
+          if (limit !== null) {
+            // available = limit - used (non-negative)
+            const used = await computeUsedBytesLocal([]);
+            const remaining = limit - used;
+            const val = remaining > 0 ? remaining : 0;
+            ok.push(`<D:quota-available-bytes>${String(val)}</D:quota-available-bytes>`);
+            continue;
+          }
+          nf.push(`<${k}/>`);
+          continue;
+        }
         nf.push(`<${k}/>`);
         continue;
       }
@@ -152,16 +176,16 @@ async function buildPropfindResponse(
     return { ok: ok.join("\n      "), nf: nf.join("\n      ") };
   }
   const selfName = parts[parts.length - 1] ?? "/";
-  function blocksFor(name: string, st: Stat): { ok: string; nf: string } {
+  async function blocksFor(name: string, path: string[], st: Stat): Promise<{ ok: string; nf: string }> {
     if (mode.mode === "propname") {
-      return renderPropBlocks(name, st, defaultKeys(), true);
+      return await renderPropBlocks(name, path, st, defaultKeys(), true);
     }
     if (mode.mode === "prop") {
-      return renderPropBlocks(name, st, mode.keys, false);
+      return await renderPropBlocks(name, path, st, mode.keys, false);
     }
-    return renderPropBlocks(name, st, null, false);
+    return await renderPropBlocks(name, path, st, null, false);
   }
-  const selfBlocks = blocksFor(selfName, stat);
+  const selfBlocks = await blocksFor(selfName, parts, stat);
   const selfOk = `\n  <D:propstat>\n    <D:prop>\n      ${selfBlocks.ok}\n    </D:prop>\n    <D:status>HTTP/1.1 200 OK</D:status>\n  </D:propstat>`;
   function nfBlock(content: string): string {
     if (content && content.trim().length > 0) {
@@ -171,32 +195,36 @@ async function buildPropfindResponse(
   }
   const selfNf = nfBlock(selfBlocks.nf);
   const selfEntry = `\n<D:response>\n  <D:href>${selfHref}</D:href>${selfOk}${selfNf}\n</D:response>`;
-  function pushEntry(parentHref: string, name: string, st: Stat) {
+  async function pushEntry(parentHref: string, name: string, st: Stat, childParts: string[]) {
     const childIsDir = st.type === "dir";
-    const childBlocks = blocksFor(name, st);
+    const childBlocks = await blocksFor(name, childParts, st);
     const okBlock = `\n  <D:propstat>\n    <D:prop>\n      ${childBlocks.ok}\n    </D:prop>\n    <D:status>HTTP/1.1 200 OK</D:status>\n  </D:propstat>`;
     const nf = nfBlock(childBlocks.nf);
     entryParts.push(`\n<D:response>\n  <D:href>${parentHref}${encodeURIComponent(name)}${childIsDir ? "/" : ""}</D:href>${okBlock}${nf}\n</D:response>`);
   }
   if (depth !== "0" && isDir) {
     const baseHref = selfHref;
-    const names = await persist.readdir(parts);
-    const filtered = shouldIgnore ? names.filter((n) => !shouldIgnore(`${baseHref}${n}`, n)) : names;
-    const stats = await Promise.all(filtered.map(async (n) => ({ name: n, st: await statOrNull(persist, [...parts, n]) })));
-    for (const { name, st } of stats) {
+    const names = await p.readdir(parts);
+    const dirUrl = urlPath.endsWith("/") ? urlPath.slice(0, -1) : urlPath;
+    const ordered = await applyOrder(p, dirUrl, names);
+    const filtered = shouldIgnore ? ordered.filter((n) => !shouldIgnore(`${baseHref}${n}`, n)) : ordered;
+    const stats = await Promise.all(filtered.map(async (n) => ({ name: n, st: await statOrNull(p, [...parts, n]), parts: [...parts, n] })));
+    for (const { name, st, parts: cparts } of stats) {
       if (!st) { continue; }
-      pushEntry(baseHref, name, st);
+      await pushEntry(baseHref, name, st, cparts);
     }
     if (String(depth).toLowerCase() === "infinity") {
       const queue = stats.filter((x) => x.st?.type === "dir").map((x) => ({ parts: [...parts, x.name], href: `${baseHref}${encodeURIComponent(x.name)}/` }));
       while (queue.length > 0) {
         const node = queue.shift()!;
-        const child = await persist.readdir(node.parts);
-        const childFiltered = shouldIgnore ? child.filter((n) => !shouldIgnore(`${node.href}${n}`, n)) : child;
-        const childStats = await Promise.all(childFiltered.map(async (n) => ({ name: n, st: await statOrNull(persist, [...node.parts, n]) })));
-        for (const { name, st } of childStats) {
+        const child = await p.readdir(node.parts);
+        const url = node.href.endsWith("/") ? node.href.slice(0, -1) : node.href;
+        const childOrdered = await applyOrder(p, url, child);
+        const childFiltered = shouldIgnore ? childOrdered.filter((n) => !shouldIgnore(`${node.href}${n}`, n)) : childOrdered;
+        const childStats = await Promise.all(childFiltered.map(async (n) => ({ name: n, st: await statOrNull(p, [...node.parts, n]), parts: [...node.parts, n] })));
+        for (const { name, st, parts: cparts } of childStats) {
           if (!st) { continue; }
-          pushEntry(node.href, name, st);
+          await pushEntry(node.href, name, st, cparts);
           if (st.type === "dir") {
             queue.push({ parts: [...node.parts, name], href: `${node.href}${encodeURIComponent(name)}/` });
           }

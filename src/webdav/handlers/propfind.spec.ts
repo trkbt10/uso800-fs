@@ -124,4 +124,16 @@ describe("PROPFIND handler", () => {
     expect(xml).toContain("<Z:unknown");
     expect(xml).toContain("<D:getcontentlength>");
   });
+
+  it("prop mode returns quota-used-bytes for directory", async () => {
+    const persist = createMemoryAdapter();
+    const logger = createLogger();
+    await persist.ensureDir(["q"]);
+    await persist.writeFile(["q", "a.txt"], new TextEncoder().encode("aa"), "text/plain");
+    await persist.writeFile(["q", "b.txt"], new TextEncoder().encode("bbb"), "text/plain");
+    const body = `<?xml version="1.0"?><D:propfind xmlns:D="DAV:"><D:prop><D:quota-used-bytes/></D:prop></D:propfind>`;
+    const result = await handlePropfindRequest("/q/", "0", { persist, logger }, body);
+    const xml = String(result.response.body ?? "");
+    expect(xml).toContain("<D:quota-used-bytes>5</D:quota-used-bytes>");
+  });
 });

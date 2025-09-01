@@ -4,12 +4,28 @@
 import type { HandlerOptions, HandlerResult } from "../../webdav/handlers/types";
 import { pathToSegments } from "../../utils/path-utils";
 import { handleGetRequest } from "../../webdav/handlers/get";
+import { readVersion } from "../../webdav/versioning";
 
 /**
  * Handle HTTP GET with Range support. Falls back to WebDAV GET for non-range or directory paths.
  */
 export async function handleHttpGetRequest(urlPath: string, headers: Record<string, string> | Headers | undefined, options: HandlerOptions): Promise<HandlerResult> {
   const { persist } = options;
+  // Version override via header X-Version-Id
+  const versionId: string | null = (() => {
+    if (headers instanceof Headers) { return headers.get("X-Version-Id"); }
+    if (headers) {
+      const map = headers as Record<string, string>;
+      return (map["X-Version-Id"] ?? map["x-version-id"] ?? null) as string | null;
+    }
+    return null;
+  })();
+  if (versionId && !urlPath.endsWith("/")) {
+    const got = await readVersion(persist, urlPath, versionId);
+    if (got) {
+      return { response: { status: 200, headers: { "Content-Type": got.mime ?? "application/octet-stream", "Accept-Ranges": "bytes", "Content-Length": String(got.data.length) }, body: got.data } };
+    }
+  }
   const rangeHeader: string | null = (() => {
     if (headers instanceof Headers) { return headers.get("Range"); }
     if (headers) {
