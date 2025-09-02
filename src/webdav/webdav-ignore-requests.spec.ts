@@ -25,4 +25,11 @@ describe("Ignored path requests", () => {
     const res = await app.request(new Request("http://localhost/._shadow", { method: "GET" }));
     expect(res.status).toBe(404);
   });
+
+  it("returns 404 for PROPFIND to macOS indexing blocker", async () => {
+    const persist = createMemoryAdapter();
+    const app = makeWebdavApp({ persist });
+    const res = await app.request(new Request("http://localhost/.metadata_never_index_unless_ro", { method: "PROPFIND", headers: { Depth: "1" } }));
+    expect(res.status).toBe(404);
+  });
 });

@@ -59,6 +59,8 @@ export function buildIgnoreRegexps(globs?: string[]): RegExp[] {
   const defaults = [
     "**/._*",
     "**/.DS_Store",
+    "**/.metadata_never_index*",
+    "**/.localized",
     "**/Thumbs.db",
     "**/desktop.ini",
     "**/.Spotlight-V100",

@@ -74,7 +74,7 @@ describe("WebDAV client E2E", () => {
       async fabricateFileContent(path) {
         calls.file += 1;
         const name = path[path.length - 1] ?? "file.txt";
-        return `auto:${name}`;
+        await persist.writeFile(path, new TextEncoder().encode(`auto:${name}`), "text/plain");
       },
     };
     const app = makeWebdavApp({ persist, hooks: createLlmWebDavHooks(llm) });
@@ -125,6 +125,76 @@ describe("WebDAV client E2E", () => {
       const text3 = await client.getFileContents("/hello.txt", { format: "text" });
       expect(text3).toBe("auto:hello.txt");
       expect(calls).toEqual({ list: 2, file: 2 });
+    });
+  }, 10000);
+
+  maybeIt("nested folders/files: create → move (dir+file, large) → delete", async () => {
+    const persist: PersistAdapter = createMemoryAdapter();
+    const app = makeWebdavApp({ persist });
+    await withHttp(app, async (base) => {
+      const client = createClient(base);
+
+      // Create nested directories
+      await client.createDirectory("/nest");
+      await client.createDirectory("/nest/a");
+      await client.createDirectory("/nest/a/b");
+      await client.createDirectory("/nest/a/b/c");
+
+      // Write a large file (512 KiB) deep in the tree
+      const big = new Uint8Array(512 * 1024);
+      for (let i = 0; i < big.length; i++) { big[i] = i % 251; }
+      await client.putFileContents("/nest/a/b/c/deep.txt", Buffer.from(big));
+
+      // Verify it was written
+      const got1 = await client.getFileContents("/nest/a/b/c/deep.txt");
+      expect((got1 as Buffer).byteLength ?? (got1 as Uint8Array).length).toBe(big.length);
+
+      // Move directory /nest/a/b -> /nest/a/b2 and ensure deep file moved
+      await client.moveFile("/nest/a/b", "/nest/a/b2");
+      const moved1 = await client.getFileContents("/nest/a/b2/c/deep.txt");
+      expect((moved1 as Buffer).byteLength ?? (moved1 as Uint8Array).length).toBe(big.length);
+      await expect(async () => { await client.getFileContents("/nest/a/b/c/deep.txt"); }).rejects.toBeTruthy();
+
+      // Move the deep file to another branch with a new name
+      await client.createDirectory("/x");
+      await client.createDirectory("/x/y");
+      await client.moveFile("/nest/a/b2/c/deep.txt", "/x/y/deep-moved.txt");
+      const moved2 = await client.getFileContents("/x/y/deep-moved.txt");
+      expect((moved2 as Buffer).byteLength ?? (moved2 as Uint8Array).length).toBe(big.length);
+      await expect(async () => { await client.getFileContents("/nest/a/b2/c/deep.txt"); }).rejects.toBeTruthy();
+
+      // Delete the moved file and the entire original /nest tree (now contains empty dirs)
+      await client.deleteFile("/x/y/deep-moved.txt");
+      await expect(async () => { await client.getFileContents("/x/y/deep-moved.txt"); }).rejects.toBeTruthy();
+
+      // Delete nested directories (leaf to root)
+      await client.deleteFile("/x/y");
+      await client.deleteFile("/x");
+      await client.deleteFile("/nest/a/b2/c");
+      await client.deleteFile("/nest/a/b2");
+      await client.deleteFile("/nest/a");
+      await client.deleteFile("/nest");
+
+      // Root should no longer list these directories
+      const root = await client.getDirectoryContents("/");
+      type Listed = { basename?: string };
+      type DirItem = { basename?: string } | { data?: Array<Listed> };
+      const names = (() => {
+        if (Array.isArray(root)) {
+          const arr = root as Array<Listed>;
+          return arr.map((e) => (e?.basename ?? ""));
+        }
+        const d = root as DirItem;
+        if (typeof d === "object") {
+          const bag = (d as { data?: Array<Listed> }).data;
+          if (Array.isArray(bag)) {
+            return bag.map((e) => e?.basename ?? "");
+          }
+        }
+        return [] as string[];
+      })();
+      expect(names).not.toContain("nest");
+      expect(names).not.toContain("x");
     });
   }, 10000);
 });
