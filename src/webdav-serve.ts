@@ -12,6 +12,11 @@ import { makeWebdavApp } from "./webdav/server";
 import { createNodeFsAdapter } from "./webdav/persist/node-fs";
 import { createDataLoaderAdapter } from "./webdav/persist/dataloader-adapter";
 import { createWebDAVLogger } from "./logging/webdav-logger";
+import { composeDialects } from "./webdav/dialect/types";
+import { finderDialect } from "./webdav/dialect/finder";
+import { windowsWebClientDialect } from "./webdav/dialect/windows";
+import { linuxGvfsDialect } from "./webdav/dialect/linux";
+import { officeDialect } from "./webdav/dialect/office";
 
 /**
  * Parsed CLI options for the standalone server.
@@ -78,7 +83,8 @@ async function main(): Promise<void> {
     const nodeFs = createNodeFsAdapter(opts.root);
     const persist = createDataLoaderAdapter(nodeFs);
     const logger = createWebDAVLogger();
-  const app = makeWebdavApp({ persist, logger, relaxDepthForDirOps: "auto" });
+    const dialect = composeDialects([finderDialect(), windowsWebClientDialect(), linuxGvfsDialect(), officeDialect()]);
+    const app = makeWebdavApp({ persist, logger, dialect });
 
     serve({ fetch: app.fetch, port: opts.port, hostname: opts.host });
 

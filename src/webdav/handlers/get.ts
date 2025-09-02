@@ -39,8 +39,9 @@ export async function handleGetRequest(urlPath: string, options: HandlerOptions)
         const content = await persist.readFile(segments);
         logger?.logRead(urlPath, 200, content.length);
         const etag = `W/"${String(stat.size ?? 0)}-${stat.mtime ?? ""}"`;
+        const lastMod = (() => { const d = stat.mtime ? new Date(stat.mtime) : null; return d && !isNaN(d.getTime()) ? d.toUTCString() : stat.mtime; })();
         const contentType = stat.mime ?? "application/octet-stream";
-        return { response: { status: 200, headers: { "Content-Type": contentType, "Accept-Ranges": "bytes", "Content-Length": String(content.length), ...(stat.mtime ? { "Last-Modified": stat.mtime } : {}), ...(etag ? { ETag: etag } : {}) }, body: content } };
+        return { response: { status: 200, headers: { "Content-Type": contentType, "Accept-Ranges": "bytes", "Content-Length": String(content.length), ...(lastMod ? { "Last-Modified": lastMod } : {}), ...(etag ? { ETag: etag } : {}) }, body: content } };
       }
       // Directory listing
       const childrenRaw = await persist.readdir(segments);
@@ -75,7 +76,8 @@ export async function handleGetRequest(urlPath: string, options: HandlerOptions)
       const content = await persist.readFile(segments);
       const etag = `W/"${String(stat.size ?? 0)}-${stat.mtime ?? ""}"`;
       const contentType = stat.mime ?? "application/octet-stream";
-      return { response: { status: 200, headers: { "Content-Type": contentType, "Accept-Ranges": "bytes", "Content-Length": String(content.length), ...(stat.mtime ? { "Last-Modified": stat.mtime } : {}), ...(etag ? { ETag: etag } : {}) }, body: content } };
+      const lastMod2 = (() => { const d = stat.mtime ? new Date(stat.mtime) : null; return d && !isNaN(d.getTime()) ? d.toUTCString() : stat.mtime; })();
+      return { response: { status: 200, headers: { "Content-Type": contentType, "Accept-Ranges": "bytes", "Content-Length": String(content.length), ...(lastMod2 ? { "Last-Modified": lastMod2 } : {}), ...(etag ? { ETag: etag } : {}) }, body: content } };
     }
     const children = await persist.readdir(segments);
     const body = `<html><body><h1>Index of /${segments.join("/")}</h1><ul>${children.map((n) => `<li><a href="${encodeURIComponent(n)}">${n}</a></li>`).join("")}</ul></body></html>`;

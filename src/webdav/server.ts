@@ -25,7 +25,7 @@ import {
 } from "./";
 import type { WebDavHooks } from "./hooks";
 import { createDavStateStore } from "./dav-state";
-import { checkDepthInfinityRequiredForDir, etagMatchesIfHeader, requireLockOk } from "./http-guards";
+import { etagMatchesIfHeader, requireLockOk } from "./http-guards";
 import { maybeIgnored } from "./ignore-guards";
 import { toResponse } from "./response";
 import { parseMkcolProps } from "./xml/mkcol-parse";
@@ -35,6 +35,12 @@ import { handleReportRequest } from "./handlers/report";
 import { handleOrderpatchRequest } from "./handlers/orderpatch";
 import type { DialectPolicy } from "./dialect/types";
 import { strictDialect } from "./dialect/types";
+import { composeHooks } from "./hooks-compose";
+import { createPropfindBriefCompatHooks } from "./dialect/compat/propfind-brief";
+import { createGetPreferMinimalHooks } from "./dialect/compat/get-prefer-minimal";
+import { createPropfindLockPropsCompatHooks } from "./dialect/compat/propfind-lock-props";
+import { pathFromUrlOrAbsolute } from "./utils/url-normalize";
+import { ensureDepthOkForDirOpsGuard, ensureLockOkForProppatchGuard } from "./dialect/ensure";
 
 /**
  * Creates a Hono-based WebDAV app using the provided PersistAdapter.
@@ -51,7 +57,12 @@ export function makeWebdavApp(opts: {
   dialect?: DialectPolicy;
 }) {
   const basePersist = opts.persist;
-  const hooks = opts.hooks;
+  const hooks = composeHooks(
+    opts.hooks,
+    createPropfindBriefCompatHooks(),
+    createPropfindLockPropsCompatHooks(),
+    createGetPreferMinimalHooks(),
+  );
   const logger = opts.logger ?? createWebDAVLogger();
   const app = new Hono();
 
@@ -121,8 +132,11 @@ export function makeWebdavApp(opts: {
     for (const [k, v] of c.req.raw.headers) {
       hdrs[k] = v;
     }
+    const before = await hooks.beforeGet?.({ urlPath: p, segments: pathToSegments(p), persist, logger, getHeader(name: string): string { const v = c.req.header(name); return typeof v === "string" ? v : ""; } });
+    if (before) { return send(c, before); }
     const result = await handleHttpGetRequest(p, hdrs, { persist, hooks, logger });
-    return send(c, result.response);
+    const after = await hooks.afterGet?.({ urlPath: p, segments: pathToSegments(p), persist, logger, getHeader(name: string): string { const v = c.req.header(name); return typeof v === "string" ? v : ""; } }, result.response);
+    return send(c, after ?? result.response);
   });
 
   app.on("HEAD", "/*", async (c) => {
@@ -195,21 +209,36 @@ export function makeWebdavApp(opts: {
       }
       const persist = basePersist;
       const bodyText: string | null = await c.req.text().then((t) => t).catch(() => null);
+      // beforePropfind hook (with getHeader so compat can see Brief/Prefer)
+      const headersMap: Record<string, string> = {};
+      for (const [k, v] of c.req.raw.headers) { headersMap[k] = v; }
+      const before = await hooks.beforePropfind?.({
+        urlPath: p,
+        segments: pathToSegments(p),
+        depth,
+        persist,
+        logger,
+        getHeader(name: string): string { const v = c.req.header(name); return typeof v === "string" ? v : ""; },
+      });
+      if (before) { return send(c, before); }
       const result = await handlePropfindRequest(p, depth, {
         persist,
-        hooks,
         logger,
         shouldIgnore: (full: string, base: string) => {
-          if (isIgnored(full)) {
-            return true;
-          }
-          if (isIgnored(base)) {
-            return true;
-          }
+          if (isIgnored(full)) { return true; }
+          if (isIgnored(base)) { return true; }
           return false;
         },
       }, bodyText);
-      return send(c, result.response);
+      const after = await hooks.afterPropfind?.({
+        urlPath: p,
+        segments: pathToSegments(p),
+        depth,
+        persist,
+        logger,
+        getHeader(name: string): string { const v = c.req.header(name); return typeof v === "string" ? v : ""; },
+      }, result.response);
+      return send(c, after ?? result.response);
     }
 
     if (method === "MKCOL") {
@@ -271,7 +300,7 @@ export function makeWebdavApp(opts: {
         return send(c, { status: 403 });
       }
       const body = await c.req.text();
-      const ok = await requireLockOk(davState, p, c.req.raw.headers, "Lock-Token");
+      const ok = await ensureLockOkForProppatchGuard(compat, davState, c, p);
       if (!ok) { return send(c, { status: 423 }); }
       const etagOk = await etagMatchesIfHeader(basePersist, p, c.req.raw.headers);
       if (!etagOk) { return send(c, { status: 412 }); }
@@ -287,34 +316,20 @@ export function makeWebdavApp(opts: {
       if (!destination) { return send(c, { status: 400 }); }
       const overwrite = (c.req.header("Overwrite") ?? "T").toUpperCase() !== "F";
       const persist = basePersist;
-      const destUrl = new URL(destination);
-      const uaHeader = c.req.header("User-Agent");
-      const ua = typeof uaHeader === "string" ? uaHeader : "";
-      const relax = compat.shouldRelaxDepthForDirOps({
-        method,
-        path: p,
-        userAgent: ua,
-        getHeader(name: string): string {
-          const v = c.req.header(name);
-          return typeof v === "string" ? v : "";
-        },
-      });
-      async function depthOk(): Promise<boolean> {
-        if (relax) { return true; }
-        return await checkDepthInfinityRequiredForDir(persist, p, () => c.req.header("Depth"));
-      }
-      const okDepth = await depthOk();
+      const destPath = pathFromUrlOrAbsolute(destination);
+      if (!destPath) { return send(c, { status: 400 }); }
+      const okDepth = await ensureDepthOkForDirOpsGuard(compat, c, method, p, persist);
       if (!okDepth) { return send(c, { status: 400 }); }
       const srcOk = await requireLockOk(davState, p, c.req.raw.headers, "Lock-Token");
-      const dstOk = await requireLockOk(davState, destUrl.pathname, c.req.raw.headers, "Lock-Token");
+      const dstOk = await requireLockOk(davState, destPath, c.req.raw.headers, "Lock-Token");
       if (!srcOk || !dstOk) { return send(c, { status: 423 }); }
       const etagOk = await etagMatchesIfHeader(basePersist, p, c.req.raw.headers);
       if (!etagOk) { return send(c, { status: 412 }); }
       if (method === "MOVE") {
-        const moved = await handleMoveRequest(p, destUrl.pathname, { persist, logger, overwrite });
+        const moved = await handleMoveRequest(p, destPath, { persist, logger, overwrite });
         return send(c, moved.response);
       }
-      const copied = await handleCopyRequest(p, destUrl.pathname, { persist, logger, overwrite });
+      const copied = await handleCopyRequest(p, destPath, { persist, logger, overwrite });
       return send(c, copied.response);
     }
 
@@ -325,25 +340,11 @@ export function makeWebdavApp(opts: {
       const srcHeader = c.req.header("Source");
       if (!srcHeader) { return send(c, { status: 400 }); }
       const overwrite = (c.req.header("Overwrite") ?? "T").toUpperCase() !== "F";
-      const srcUrl = new URL(srcHeader);
-      const uaHeader2 = c.req.header("User-Agent");
-      const ua2 = typeof uaHeader2 === "string" ? uaHeader2 : "";
-      const relax2 = compat.shouldRelaxDepthForDirOps({
-        method,
-        path: srcUrl.pathname,
-        userAgent: ua2,
-        getHeader(name: string): string {
-          const v = c.req.header(name);
-          return typeof v === "string" ? v : "";
-        },
-      });
-      async function depthOk2(): Promise<boolean> {
-        if (relax2) { return true; }
-        return await checkDepthInfinityRequiredForDir(basePersist, srcUrl.pathname, () => c.req.header("Depth"));
-      }
-      const okDepth = await depthOk2();
+      const srcPathname = pathFromUrlOrAbsolute(srcHeader);
+      if (!srcPathname) { return send(c, { status: 400 }); }
+      const okDepth = await ensureDepthOkForDirOpsGuard(compat, c, method, srcPathname, basePersist);
       if (!okDepth) { return send(c, { status: 400 }); }
-      const copied = await handleCopyRequest(srcUrl.pathname, p, { persist: basePersist, logger, overwrite });
+      const copied = await handleCopyRequest(srcPathname, p, { persist: basePersist, logger, overwrite });
       return send(c, copied.response);
     }
 
@@ -366,25 +367,11 @@ export function makeWebdavApp(opts: {
       const destination = c.req.header("Destination");
       if (!destination) { return send(c, { status: 400 }); }
       const overwrite = (c.req.header("Overwrite") ?? "T").toUpperCase() !== "F";
-      const destUrl = new URL(destination);
-      const uaHeader3 = c.req.header("User-Agent");
-      const ua3 = typeof uaHeader3 === "string" ? uaHeader3 : "";
-      const relax3 = compat.shouldRelaxDepthForDirOps({
-        method,
-        path: p,
-        userAgent: ua3,
-        getHeader(name: string): string {
-          const v = c.req.header(name);
-          return typeof v === "string" ? v : "";
-        },
-      });
-      async function depthOk3(): Promise<boolean> {
-        if (relax3) { return true; }
-        return await checkDepthInfinityRequiredForDir(basePersist, p, () => c.req.header("Depth"));
-      }
-      const okDepth = await depthOk3();
+      const destPath2 = pathFromUrlOrAbsolute(destination);
+      if (!destPath2) { return send(c, { status: 400 }); }
+      const okDepth = await ensureDepthOkForDirOpsGuard(compat, c, method, p, basePersist);
       if (!okDepth) { return send(c, { status: 400 }); }
-      const moved = await handleMoveRequest(p, destUrl.pathname, { persist: basePersist, logger, overwrite });
+      const moved = await handleMoveRequest(p, destPath2, { persist: basePersist, logger, overwrite });
       return send(c, moved.response);
     }
 

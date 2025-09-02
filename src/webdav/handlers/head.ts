@@ -22,8 +22,9 @@ export async function handleHeadRequest(urlPath: string, options: HandlerOptions
       return { response: { status: 200, headers: { "Content-Type": "text/html", "Accept-Ranges": "bytes" } } };
     }
     const etag = `W/"${String(stat.size ?? 0)}-${stat.mtime ?? ""}"`;
+    const lastMod = (() => { const d = stat.mtime ? new Date(stat.mtime) : null; return d && !isNaN(d.getTime()) ? d.toUTCString() : stat.mtime; })();
     const contentType = stat.mime ?? "application/octet-stream";
-    return { response: { status: 200, headers: { "Content-Type": contentType, "Content-Length": String(stat.size ?? 0), "Accept-Ranges": "bytes", ...(stat.mtime ? { "Last-Modified": stat.mtime } : {}), ...(etag ? { ETag: etag } : {}) } } };
+    return { response: { status: 200, headers: { "Content-Type": contentType, "Content-Length": String(stat.size ?? 0), "Accept-Ranges": "bytes", ...(lastMod ? { "Last-Modified": lastMod } : {}), ...(etag ? { ETag: etag } : {}) } } };
   } catch (err) {
     const mapped = mapErrorToDav(err);
     return { response: { status: mapped.status } };

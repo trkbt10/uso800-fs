@@ -50,6 +50,11 @@ describe("UA-driven compat policies (server integration)", () => {
     await mkcol(app, "/w3");
     const bad = await moveWithoutDepth(app, "/w3", "/w4", "curl/8.0");
     expect(bad.status).toBe(400);
+
+    // Also accept DavClnt alias observed for Windows WebClient
+    await mkcol(app, "/w5");
+    const ok2 = await moveWithoutDepth(app, "/w5", "/w6", "DavClnt");
+    expect([201, 204]).toContain(ok2.status);
   });
 
   it("linuxGvfsDialect relaxes for gvfs/gio/cadaver/davfs2 only", async () => {
@@ -66,6 +71,10 @@ describe("UA-driven compat policies (server integration)", () => {
     await mkcol(app, "/l5");
     const ok3 = await moveWithoutDepth(app, "/l5", "/l6", "davfs2/1.6.1");
     expect([201, 204]).toContain(ok3.status);
+
+    await mkcol(app, "/l7a");
+    const ok4 = await moveWithoutDepth(app, "/l7a", "/l8a", "gnome-vfs/2.24");
+    expect([201, 204]).toContain(ok4.status);
 
     await mkcol(app, "/l7");
     const bad = await moveWithoutDepth(app, "/l7", "/l8", "curl/8.0");

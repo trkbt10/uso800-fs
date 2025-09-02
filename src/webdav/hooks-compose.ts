@@ -29,5 +29,41 @@ export function composeHooks(...hooksList: Array<WebDavHooks | undefined>): WebD
     async beforeGet(ctx) { return await first((h) => h.beforeGet, ctx); },
     async beforePut(ctx) { return await first((h) => h.beforePut, ctx); },
     async beforePropfind(ctx) { return await first((h) => h.beforePropfind, ctx); },
+    async afterGet(ctx, res) {
+      for (const h of list) {
+        if (h.afterGet) {
+          const out = await h.afterGet(ctx, res);
+          if (out !== undefined) { return out; }
+        }
+      }
+      return undefined;
+    },
+    async afterPropfind(ctx, res) {
+      for (const h of list) {
+        if (h.afterPropfind) {
+          const out = await h.afterPropfind(ctx, res);
+          if (out !== undefined) { return out; }
+        }
+      }
+      return undefined;
+    },
+    async afterPut(ctx, res) {
+      for (const h of list) {
+        if (h.afterPut) {
+          const out = await h.afterPut(ctx, res);
+          if (out !== undefined) { return out; }
+        }
+      }
+      return undefined;
+    },
+    async afterMkcol(ctx, res) {
+      for (const h of list) {
+        if (h.afterMkcol) {
+          const out = await h.afterMkcol(ctx, res);
+          if (out !== undefined) { return out; }
+        }
+      }
+      return undefined;
+    },
   };
 }

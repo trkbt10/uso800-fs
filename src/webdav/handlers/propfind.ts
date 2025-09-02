@@ -52,7 +52,17 @@ export async function handlePropfindRequest(
   } catch {
     // Fall through to normal PROPFIND
   }
-  const response = await buildPropfindResponse(createDataLoaderAdapter(persist), urlPath, segments, normalizedDepth, logger, shouldIgnore, bodyText ?? undefined);
+  const response = await buildPropfindResponse(
+    createDataLoaderAdapter(persist),
+    urlPath,
+    segments,
+    normalizedDepth,
+    logger,
+    shouldIgnore,
+    bodyText ?? undefined,
+    options.omit404Propstat === true,
+    options.appliedReturnMinimal === true,
+  );
   return { response };
 }
 
@@ -98,6 +108,13 @@ function computeEtag(st: Stat): string {
   return `W/"${String(st.size ?? 0)}-${st.mtime ?? ""}"`;
 }
 
+function toHttpDateUTC(s: string | undefined | null): string | undefined {
+  if (!s) { return undefined; }
+  const d = new Date(s);
+  if (isNaN(d.getTime())) { return s ?? undefined; }
+  return d.toUTCString();
+}
+
 async function buildPropfindResponse(
   persist: PersistAdapter,
   urlPath: string,
@@ -106,6 +123,8 @@ async function buildPropfindResponse(
   logger?: WebDAVLogger,
   shouldIgnore?: (fullPath: string, baseName: string) => boolean,
   bodyText?: string,
+  omit404Propstat?: boolean,
+  appliedReturnMinimal?: boolean,
 ): Promise<DavResponse> {
   const p = createDataLoaderAdapter(persist);
   const exists = await persist.exists(parts);
@@ -135,7 +154,10 @@ async function buildPropfindResponse(
       "D:displayname": name,
       "D:getcontentlength": String(st.size ?? 0),
       "D:resourcetype": st.type === "dir" ? "<D:collection/>" : "",
-      "D:getlastmodified": st.mtime ?? "",
+      // Finder expects UTC timezone for getlastmodified.
+      // @reference https://sabre.io/dav/clients/finder/
+      //   quote: "best to send back all getlastmodified properties in the UTC timezone."
+      "D:getlastmodified": toHttpDateUTC(st.mtime) ?? "",
       "D:getetag": computeEtag(st),
     };
     const selected = keys ? keys : defaultKeys();
@@ -188,6 +210,9 @@ async function buildPropfindResponse(
   const selfBlocks = await blocksFor(selfName, parts, stat);
   const selfOk = `\n  <D:propstat>\n    <D:prop>\n      ${selfBlocks.ok}\n    </D:prop>\n    <D:status>HTTP/1.1 200 OK</D:status>\n  </D:propstat>`;
   function nfBlock(content: string): string {
+    if (omit404Propstat === true) {
+      return "";
+    }
     if (content && content.trim().length > 0) {
       return `\n  <D:propstat>\n    <D:prop>\n      ${content}\n    </D:prop>\n    <D:status>HTTP/1.1 404 Not Found</D:status>\n  </D:propstat>`;
     }
@@ -235,5 +260,9 @@ async function buildPropfindResponse(
   const footer = "</D:multistatus>";
   const count = entryParts.length;
   logger?.logList(urlPath, 207, count);
-  return { status: 207, headers: { "Content-Type": "application/xml" }, body: [header, selfEntry, ...entryParts, footer].join("") };
+  const headers: Record<string, string> = { "Content-Type": "application/xml" };
+  if (appliedReturnMinimal === true) {
+    headers["Preference-Applied"] = "return=minimal";
+  }
+  return { status: 207, headers, body: [header, selfEntry, ...entryParts, footer].join("") };
 }

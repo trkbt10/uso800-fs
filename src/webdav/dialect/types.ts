@@ -13,17 +13,27 @@ export type DialectContext = {
 
 export type DialectPolicy = {
   /**
-   * Whether to relax the Depth: infinity requirement for directory MOVE/COPY-like ops.
-   * Return true to relax, false to require strict spec handling.
+   * Allows a policy to directly decide Depth handling for directory MOVE/COPY-like ops.
+   * Implementations may fully absorb a client's dialect (return true), defer to the
+   * default RFC check (call defaultCheck), or reject (return false).
    */
-  shouldRelaxDepthForDirOps(ctx: DialectContext): boolean;
+  ensureDepthOkForDirOps(ctx: DialectContext, defaultCheck: () => Promise<boolean>): Promise<boolean>;
+  /**
+   * Allows a policy to decide whether to enforce lock tokens on PROPPATCH.
+   * Some clients (e.g., Microsoft Office) have been observed to omit lock tokens
+   * on property updates. Policies may choose to absorb this and return true.
+   */
+  ensureLockOkForProppatch(ctx: DialectContext, defaultCheck: () => Promise<boolean>): Promise<boolean>;
 };
 
 /** Creates a policy that never relaxes any behavior. */
 export function strictDialect(): DialectPolicy {
   return {
-    shouldRelaxDepthForDirOps() {
-      return false;
+    async ensureDepthOkForDirOps(_ctx, defaultCheck) {
+      return await defaultCheck();
+    },
+    async ensureLockOkForProppatch(_ctx, defaultCheck) {
+      return await defaultCheck();
     },
   };
 }
@@ -31,14 +41,19 @@ export function strictDialect(): DialectPolicy {
 /** OR-composes multiple dialect policies. Returns true if any policy says true. */
 export function composeDialects(list: DialectPolicy[]): DialectPolicy {
   return {
-    shouldRelaxDepthForDirOps(ctx: DialectContext): boolean {
+    async ensureDepthOkForDirOps(ctx: DialectContext, defaultCheck: () => Promise<boolean>): Promise<boolean> {
       for (const p of list) {
-        if (p.shouldRelaxDepthForDirOps(ctx)) {
-          return true;
-        }
+        const ok = await p.ensureDepthOkForDirOps(ctx, async () => Promise.resolve(false));
+        if (ok) { return true; }
       }
-      return false;
+      return await defaultCheck();
+    },
+    async ensureLockOkForProppatch(ctx: DialectContext, defaultCheck: () => Promise<boolean>): Promise<boolean> {
+      for (const p of list) {
+        const ok = await p.ensureLockOkForProppatch(ctx, async () => Promise.resolve(false));
+        if (ok) { return true; }
+      }
+      return await defaultCheck();
     },
   };
 }
-

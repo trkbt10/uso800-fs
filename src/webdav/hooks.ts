@@ -16,8 +16,8 @@ export type WebDavCommonContext = {
   logger?: WebDAVLogger;
 };
 
-export type WebDavGetContext = WebDavCommonContext & {};
-export type WebDavPropfindContext = WebDavCommonContext & { depth: string | null };
+export type WebDavGetContext = WebDavCommonContext & { getHeader?: (name: string) => string };
+export type WebDavPropfindContext = WebDavCommonContext & { depth: string | null; getHeader?: (name: string) => string };
 export type WebDavPutContext = WebDavCommonContext & {
   body: Uint8Array;
   // Mutator to replace request body and contentType before writing
