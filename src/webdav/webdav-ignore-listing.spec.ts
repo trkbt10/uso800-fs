@@ -56,4 +56,22 @@ describe("WebDAV default ignore patterns in listings", () => {
     expect(body).not.toContain("<D:href>/folder/._hidden</D:href>");
     expect(body).not.toContain("<D:href>/folder/.AppleDouble</D:href>");
   });
+
+  it("hides internal _dav folder from GET directory listing", async () => {
+    const persist = createMemoryAdapter();
+    // visible entry
+    await persist.writeFile(["visible.txt"], new TextEncoder().encode("ok"), "text/plain");
+    // internal storage that should never be exposed
+    await persist.ensureDir(["_dav"]);
+    await persist.ensureDir(["_dav", "order"]);
+    await persist.writeFile(["_dav", "order", "dummy.json"], new TextEncoder().encode("{}"), "application/json");
+
+    const app = makeWebdavApp({ persist });
+
+    const res = await app.request(new Request("http://localhost/", { method: "GET" }));
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain(">visible.txt<");
+    expect(html).not.toContain(">_dav<");
+  });
 });

@@ -206,6 +206,22 @@ describe("WebDAV Integration", () => {
       // Note: In the actual implementation, this would call LLM
       expect(await ctx.persist!.exists(["new-collection"])).toBe(true);
     });
+
+    it("after MKCOL forwards exact folder segments to fabricateListing (image-like name)", async () => {
+      const name = "borges_jpg_images";
+      const res = await ctx.app!.request(`/${name}`, { method: "MKCOL" });
+      expect([201, 405]).toContain(res.status);
+      // Our test LLM records listingCalls; ensure it was invoked with the exact folder path
+      const calls = ctx.llm!.listingCalls;
+      // At least one call should include [name] (no let usage)
+      function matchesName(xs: unknown): boolean {
+        if (!Array.isArray(xs)) { return false; }
+        if (xs.length !== 1) { return false; }
+        return xs[0] === name;
+      }
+      const found = calls.some((c) => matchesName(c));
+      expect(found).toBe(true);
+    });
   });
   
   describe("WebDAV compliance", () => {

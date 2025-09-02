@@ -68,6 +68,7 @@ export function buildIgnoreRegexps(globs?: string[]): RegExp[] {
     "**/.AppleDB",
     "**/.TemporaryItems",
     "**/.apDisk",
+    "**/_dav",
     "**/_dav/**",
   ];
   const all = [...defaults, ...(globs ?? [])];
