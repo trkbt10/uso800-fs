@@ -33,11 +33,8 @@ import { isMethodAllowed } from "./acl";
 import { handleSearchRequest } from "./handlers/search";
 import { handleReportRequest } from "./handlers/report";
 import { handleOrderpatchRequest } from "./handlers/orderpatch";
-import type { CompatPolicy } from "./compat/types";
-import { strictPolicy } from "./compat/types";
-import { finderPolicy } from "./compat/finder";
-import { linuxGvfsPolicy } from "./compat/linux";
-import { windowsWebClientPolicy } from "./compat/windows";
+import type { DialectPolicy } from "./dialect/types";
+import { strictDialect } from "./dialect/types";
 
 /**
  * Creates a Hono-based WebDAV app using the provided PersistAdapter.
@@ -50,16 +47,8 @@ export function makeWebdavApp(opts: {
   hooks?: WebDavHooks;
   logger?: WebDAVLogger;
   ignoreGlobs?: string[];
-  /**
-   * Finder compatibility: allow MOVE/COPY/REBIND on directories even when
-   * Depth header is missing by treating it as "infinity".
-   * - true: always relax
-   * - "auto": relax only when User-Agent indicates Finder/WebDAVFS
-   * - false/undefined: strict (spec-compliant)
-   */
-  relaxDepthForDirOps?: boolean | "auto";
-  /** Optional client-compatibility policy layer (sidecar). */
-  compat?: CompatPolicy;
+  /** Optional client dialect policy layer (sidecar). */
+  dialect?: DialectPolicy;
 }) {
   const basePersist = opts.persist;
   const hooks = opts.hooks;
@@ -189,27 +178,7 @@ export function makeWebdavApp(opts: {
     return send(c, result.response);
   });
 
-  const compat: CompatPolicy = (() => {
-    // Explicit compat policy takes precedence
-    if (opts.compat) { return opts.compat; }
-    // Backward-compat: map relaxDepthForDirOps option to a simple policy
-    if (opts.relaxDepthForDirOps === true) {
-      return { shouldRelaxDepthForDirOps() { return true; } };
-    }
-    if (opts.relaxDepthForDirOps === "auto") {
-      // Auto: common desktop client heuristics
-      const chain = {
-        shouldRelaxDepthForDirOps(ctx: { method: string; path: string; userAgent: string; getHeader: (name: string) => string }): boolean {
-          if (finderPolicy().shouldRelaxDepthForDirOps(ctx)) { return true; }
-          if (windowsWebClientPolicy().shouldRelaxDepthForDirOps(ctx)) { return true; }
-          if (linuxGvfsPolicy().shouldRelaxDepthForDirOps(ctx)) { return true; }
-          return false;
-        },
-      } satisfies CompatPolicy;
-      return chain;
-    }
-    return strictPolicy();
-  })();
+  const compat: DialectPolicy = opts.dialect ?? strictDialect();
 
   app.use("/*", async (c, next) => {
     const method = c.req.method.toUpperCase();

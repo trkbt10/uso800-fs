@@ -1,8 +1,8 @@
 /**
- * @file Types for WebDAV client-compatibility sidecar policies.
+ * @file Types for WebDAV client dialect policies.
  */
 
-export type CompatContext = {
+export type DialectContext = {
   method: string;
   path: string;
   /** Normalized user-agent string (may be empty). */
@@ -11,16 +11,16 @@ export type CompatContext = {
   getHeader: (name: string) => string;
 };
 
-export type CompatPolicy = {
+export type DialectPolicy = {
   /**
    * Whether to relax the Depth: infinity requirement for directory MOVE/COPY-like ops.
    * Return true to relax, false to require strict spec handling.
    */
-  shouldRelaxDepthForDirOps(ctx: CompatContext): boolean;
+  shouldRelaxDepthForDirOps(ctx: DialectContext): boolean;
 };
 
 /** Creates a policy that never relaxes any behavior. */
-export function strictPolicy(): CompatPolicy {
+export function strictDialect(): DialectPolicy {
   return {
     shouldRelaxDepthForDirOps() {
       return false;
@@ -28,10 +28,10 @@ export function strictPolicy(): CompatPolicy {
   };
 }
 
-/** OR-composes multiple policies. Returns true if any policy says true. */
-export function composePolicies(list: CompatPolicy[]): CompatPolicy {
+/** OR-composes multiple dialect policies. Returns true if any policy says true. */
+export function composeDialects(list: DialectPolicy[]): DialectPolicy {
   return {
-    shouldRelaxDepthForDirOps(ctx: CompatContext): boolean {
+    shouldRelaxDepthForDirOps(ctx: DialectContext): boolean {
       for (const p of list) {
         if (p.shouldRelaxDepthForDirOps(ctx)) {
           return true;
@@ -41,3 +41,4 @@ export function composePolicies(list: CompatPolicy[]): CompatPolicy {
     },
   };
 }
+
