@@ -129,5 +129,3 @@ export function createUsoFsLLMInstance(
 
   return { fabricateListing, fabricateFileContent };
 }
-
-// image generation and file write logic lives in executors/fs-actions

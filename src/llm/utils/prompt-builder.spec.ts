@@ -77,6 +77,13 @@ describe("buildListingStyleHints", () => {
     
     expect(hints).toContain("Mix 1-2 dirs and 1-3 files with playful names");
   });
+
+  it("provides image-related hints for image-like folder names", () => {
+    const h1 = buildListingStyleHints(["images"]);
+    expect(h1.some((h) => h.includes("image files (.jpg/.png)"))).toBe(true);
+    const h2 = buildListingStyleHints(["borges_jpg_images"]);
+    expect(h2.some((h) => h.includes("image files (.jpg/.png)"))).toBe(true);
+  });
   
   it("includes depth hint when depth is provided", () => {
     const hints = buildListingStyleHints(["test"], "1");

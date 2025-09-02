@@ -32,7 +32,9 @@ export async function fabricateListingImpl(
   folderPath: string[],
   options?: { depth?: string | null },
 ): Promise<void> {
-  const key = `LISTING:${deps.keyOf(folderPath)}:DEPTH:${options?.depth ?? "null"}`;
+  // Coalesce per-folder regardless of Depth to avoid duplicate runs when
+  // MKCOL (no depth) and immediate PROPFIND (Depth: 1) race for the same target.
+  const key = `LISTING:${deps.keyOf(folderPath)}`;
   return deps.withCoalescing(deps.inflight, key, async () => {
     const stats: { dirs: number; files: number; bytes: number; dirNames: string[]; fileNames: string[] } = {
       dirs: 0,

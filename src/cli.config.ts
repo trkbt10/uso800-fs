@@ -8,6 +8,7 @@ import Ajv from "ajv";
 import type { AppInitOptions } from "./index";
 import { createOpenAIImageGenProvider } from "./image-generation/OpenAIImageGenProvider";
 import { createNanoBananaImageGenProvider } from "./image-generation/NanoBananaImageGenProvider";
+import { createBuiltinImageGenProvider } from "./image-generation/BuiltinImageGenProvider";
 import type { ImageGenerationProvider } from "./image-generation/types";
 import { cliConfigSchema } from "./cli.config.schema";
 
@@ -25,7 +26,7 @@ export type CliConfig = {
     imageInstruction?: string;
   };
   image?: {
-    provider: "openai" | "nanobanana";
+    provider: "openai" | "nanobanana" | "builtin";
     openai?: {
       baseUrl?: string;
       model: string;
@@ -191,6 +192,10 @@ function buildImageProviderFromConfig(c?: CliConfig): ImageGenerationProvider | 
       apiKey: resolvedKey,
       model: nb.model,
     });
+  }
+  
+  if (c.image.provider === "builtin") {
+    return createBuiltinImageGenProvider();
   }
   
   return undefined;

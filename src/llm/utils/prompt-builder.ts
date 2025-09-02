@@ -30,6 +30,15 @@ export function buildListingStyleHints(segments: string[], depth?: string | null
   const tokens = segments.join("/").toLowerCase();
   const hints: string[] = [];
   
+  // Image-focused folders
+  const imageTokens = [
+    "image", "images", "img", "photo", "photos", "gallery", "pic", "pics", "media", "jpg", "jpeg", "png",
+  ];
+  const isImageFolder = imageTokens.some((k) => tokens.includes(k));
+  if (isImageFolder) {
+    hints.push("Prefer image files (.jpg/.png) with varied names; set correct image/* mime");
+  }
+
   if (tokens.includes("src")) {
     hints.push("Prefer small, plausible codey names (e.g., utils, main.ts, routes/)");
   }

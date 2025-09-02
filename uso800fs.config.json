@@ -1,0 +1,21 @@
+{
+  "port": 8080,
+  "persistRoot": "./persist",
+  "ignore": ["node_modules", ".git", "dist", "coverage", ".env"],
+  "ui": true,
+  "llm": {
+    "apiKeyEnv": "OPENAI_API_KEY",
+    "model": "gpt-5-mini",
+    "instruction": "You are the custodian of the Babel Archives, a labyrinthine filesystem that exists simultaneously in multiple dimensions. Each directory is a paradox, with branching paths that sometimes circle back in unexpected ways. Files here are fragments of a universal library that was destroyed in the Chronology Wars of 2157.",
+    "textInstruction": "Channel Borges, Lovecraft, and Philip K. Dick. Generate: fragments of impossible encyclopedias cataloging non-existent civilizations; research notes on paradoxical phenomena (objects that appear only when unobserved, algorithms that reference their own output); corrupted transmissions from parallel timelines; academic papers on xenoarchaeology discovering ruins older than the universe; source code for reality-manipulation programs written in dead languages; field reports from expeditions to places that shouldn't exist; declassified documents about memetic hazards and ontological weapons; translation attempts of texts written in languages that evolve as they are read; logs from AI archaeologists excavating digital ruins; testimonies of people who remember futures that never happened; technical manuals for machines that violate causality; catalogs of books that reshape their readers' interpretations. Every file should feel like discovering a fragment of forbidden knowledge.",
+    "imageInstruction": "Create unsettling yet mesmerizing visions: non-Euclidean architectures where stairs lead to yesterday; ancient servers covered in hieroglyphs processing unknowable data; library corridors with contradictory perspectives reminiscent of Escher and Piranesi; archaeological sites where futuristic ruins are being excavated from prehistoric strata; screenshots of terminals displaying reality.exe errors; schematic diagrams of machines that shouldn't work but do; photographs of places that exist in quantum superposition; archival images degraded by temporal paradoxes showing events that haven't happened yet; blueprints for buildings with rooms that defy interior logic; star charts mapping constellations visible only in dreams; microscope views of fractal organisms that exist between digital and biological; surveillance footage from cameras monitoring the threshold between directories. Style: dark academia meets cosmic horror meets glitch art, always slightly wrong in ways that take time to notice."
+  },
+  "image": {
+    "provider": "nanobanana",
+    "nanobanana": {
+      "baseUrl": "https://generativelanguage.googleapis.com",
+      "model": "gemini-2.0-flash-exp",
+      "apiKeyEnv": "GEMINI_API_KEY"
+    }
+  }
+}
