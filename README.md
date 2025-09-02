@@ -27,6 +27,83 @@ A small WebDAV server that serves a fake filesystem. If a folder/file doesn’t 
 - With interactive UI (fullscreen terminal dashboard):
   - `bun run src/index.ts --ui --port 8787 --persist-root ./debug/fakefs --model gpt-4.1-mini`
 
+### uso800fs.config.json (optional)
+Place `uso800fs.config.json` in the current directory to declaratively configure options (CLI arguments take precedence).
+
+#### Basic Configuration Example:
+
+```json
+{
+  "port": 8787,
+  "persistRoot": "./data",
+  "ignore": ["**/.DS_Store"],
+  "ui": true,
+  "llm": { 
+    "model": "gpt-4o-mini", 
+    "instruction": "extra prompt", 
+    "apiKeyEnv": "OPENAI_API_KEY" 
+  }
+}
+```
+
+#### Full Configuration Example (Borgesian SF/Weird Fiction Filesystem):
+
+```json
+{
+  "port": 8080,
+  "persistRoot": "./persist",
+  "ignore": ["node_modules", ".git", "dist", "coverage", ".env"],
+  "ui": true,
+  "llm": {
+    "apiKeyEnv": "OPENAI_API_KEY",
+    "model": "gpt-5-nano",
+    "instruction": "You are the custodian of the Babel Archives...",
+    "textInstruction": "Channel Borges, Lovecraft, and Philip K. Dick...",
+    "imageInstruction": "Create unsettling yet mesmerizing visions..."
+  },
+  "image": {
+    "provider": "nanobanana",
+    "nanobanana": {
+      "baseUrl": "https://generativelanguage.googleapis.com",
+      "model": "gemini-2.0-flash-exp",
+      "apiKeyEnv": "GEMINI_API_KEY"
+    }
+  }
+}
+```
+
+#### Configuration Fields:
+
+| Field | Description | Default |
+|-------|-------------|---------|
+| `port` | WebDAV server port number | 8787 |
+| `persistRoot` | Directory to persist generated content | None (memory only) |
+| `ignore` | Array of file/directory patterns to ignore | [] |
+| `ui` | Enable interactive UI | false |
+| **llm** | **LLM Configuration** | |
+| `llm.apiKey` | API key (direct specification) | None |
+| `llm.apiKeyEnv` | Environment variable name for API key | OPENAI_API_KEY |
+| `llm.model` | Model name to use | None |
+| `llm.instruction` | Base instruction (filesystem worldbuilding) | Default playful instruction |
+| `llm.textInstruction` | Special instruction for text file generation | None |
+| `llm.imageInstruction` | Special instruction for image generation | None |
+| **image** | **Image Generation Provider Configuration** | |
+| `image.provider` | Provider type ("openai" or "nanobanana") | None |
+| `image.openai.*` | OpenAI DALL-E configuration | |
+| `image.nanobanana.*` | Google Gemini image generation configuration | |
+
+#### Customizing LLM Instructions:
+
+Use `textInstruction` and `imageInstruction` to fine-tune the style of generated content:
+
+- **`instruction`**: Overall filesystem worldbuilding and setting (e.g., "Custodian of the Babel Archives")
+- **`textInstruction`**: Text file content style (e.g., "Borgesian fragments of impossible encyclopedias")
+- **`imageInstruction`**: Visual style for images (e.g., "Non-Euclidean architecture in dark academia style")
+
+#### Precedence:
+- CLI arguments > config file > environment variables
+- Config file is automatically loaded from the current directory
+
 ## Options
 - `--port <number>`: HTTP port (required)
 - `--state <path>`: Load initial FS snapshot (JSON)
