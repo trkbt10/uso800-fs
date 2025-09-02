@@ -4,7 +4,6 @@
 import OpenAI from "openai";
 import { createMemoryAdapter } from "./webdav/persist/memory";
 import { createNodeFsAdapter } from "./webdav/persist/node-fs";
-import { createDataLoaderAdapter } from "./webdav/persist/dataloader-adapter";
 import type { PersistAdapter } from "./webdav/persist/types";
 import { makeWebdavApp } from "./webdav/server";
 import { createWebDAVLogger } from "./logging/webdav-logger";
@@ -13,6 +12,7 @@ import type { Tracker } from "./logging/tracker";
 import { createUsoFsLLMInstance } from "./llm/fs-llm";
 import type { ImageGenerationProvider, ImageKind, ImageSize } from "./image-generation/types";
 import { createLlmWebDavHooks } from "./llm/webdav-hooks";
+import { bootstrapInitialFs } from "./bootstrap";
 
 /**
  * App initialization options.
@@ -71,7 +71,8 @@ function createPersistAdapter(options: AppInitOptions, tracker?: Tracker): Persi
     console.log("[uso800fs] Persistence root:", options.persistRoot);
   }
   const nodeFs = createNodeFsAdapter(options.persistRoot);
-  return createDataLoaderAdapter(nodeFs);
+  // Use raw Node FS here; per-request caching is applied in the WebDAV app
+  return nodeFs;
 }
 
 /**
@@ -155,32 +156,8 @@ export function createApp(options: AppInitOptions = {}) {
   const hooks = llm ? createLlmWebDavHooks(llm) : undefined;
   const logger = createWebDAVLogger(tracker);
 
-  // Bootstrap: On first boot with LLM enabled, fabricate an initial root listing
-  // so the WebDAV client immediately sees content without first navigation.
-  async function bootstrapInitialFs() {
-    if (!llm) {
-      return;
-    }
-    try {
-      await persist.ensureDir([]);
-      const names = await persist.readdir([]).catch(() => [] as string[]);
-      if (names.length !== 0) {
-        return;
-      }
-      if (!options.tracker) {
-        console.log("[uso800fs] Bootstrapping initial filesystem (root)…");
-      }
-      await llm.fabricateListing([], { depth: "1" });
-      const after = await persist.readdir([]).catch(() => [] as string[]);
-      const summary = after.length > 0 ? after.join(", ") : "<none>";
-      if (!options.tracker) {
-        console.log(`[uso800fs] Bootstrap complete. Root items: ${summary}`);
-      }
-    } catch (e) {
-      console.warn("[uso800fs] Bootstrap skipped due to error:", (e as Error)?.message ?? e);
-    }
-  }
-  void bootstrapInitialFs();
+  // Bootstrap using shared helper; no-op when llm is not present
+  void bootstrapInitialFs(persist, { fabricateListing: llm?.fabricateListing, silent: Boolean(options.tracker) });
 
   return makeWebdavApp({ persist, hooks, logger, ignoreGlobs: options.ignore });
 }

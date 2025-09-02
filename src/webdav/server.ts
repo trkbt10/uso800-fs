@@ -41,6 +41,7 @@ import { createGetPreferMinimalHooks } from "./dialect/compat/get-prefer-minimal
 import { createPropfindLockPropsCompatHooks } from "./dialect/compat/propfind-lock-props";
 import { pathFromUrlOrAbsolute } from "./utils/url-normalize";
 import { ensureDepthOkForDirOpsGuard, ensureLockOkForProppatchGuard } from "./dialect/ensure";
+import { createRequestContext } from "./persist/request-context";
 
 /**
  * Creates a Hono-based WebDAV app using the provided PersistAdapter.
@@ -68,7 +69,7 @@ export function makeWebdavApp(opts: {
 
   const ignoreRes = buildIgnoreRegexps([...(opts.ignoreGlobs ?? []), "**/_dav/**"]);
   const isIgnored = isIgnoredFactory(ignoreRes);
-  const filteredPersist = createIgnoreFilteringAdapter(basePersist, isIgnored);
+  // filteredPersist is built per-request below to ensure fresh caches
   const davState = createDavStateStore(basePersist);
 
   // guard helpers are imported; use converter for responses
@@ -127,7 +128,9 @@ export function makeWebdavApp(opts: {
     }
     const p = c.req.path;
     // Use ignore-filtering persist so GET directory listings hide internal entries like _dav
-    const persist = filteredPersist;
+    // Create a per-request persist adapter to avoid stale caches
+    const requestPersist = createRequestContext(basePersist);
+    const persist = createIgnoreFilteringAdapter(requestPersist, isIgnored);
     const hdrs: Record<string, string> = {};
     for (const [k, v] of c.req.raw.headers) {
       hdrs[k] = v;
@@ -148,7 +151,7 @@ export function makeWebdavApp(opts: {
       return send(c, { status: 403 });
     }
     const p = c.req.path;
-    const persist = basePersist;
+    const persist = createRequestContext(basePersist);
     const result = await handleHeadRequest(p, { persist, logger });
     return send(c, result.response);
   });
@@ -162,7 +165,7 @@ export function makeWebdavApp(opts: {
     if (!(await isMethodAllowed(basePersist, p, "PUT"))) {
       return send(c, { status: 403 });
     }
-    const persist = basePersist;
+    const persist = createRequestContext(basePersist);
     // Partial writes via Content-Range not implemented (explicit 501)
     const contentRange = c.req.header("Content-Range");
     if (contentRange && contentRange.trim().length > 0) {
@@ -207,7 +210,7 @@ export function makeWebdavApp(opts: {
         logger.logOutput("PROPFIND", p, 404);
         return send(c, { status: 404 });
       }
-      const persist = basePersist;
+      const persist = createRequestContext(basePersist);
       const bodyText: string | null = await c.req.text().then((t) => t).catch(() => null);
       // beforePropfind hook (with getHeader so compat can see Brief/Prefer)
       const headersMap: Record<string, string> = {};
@@ -221,9 +224,11 @@ export function makeWebdavApp(opts: {
         getHeader(name: string): string { const v = c.req.header(name); return typeof v === "string" ? v : ""; },
       });
       if (before) { return send(c, before); }
+      const persist2 = createRequestContext(basePersist);
       const result = await handlePropfindRequest(p, depth, {
-        persist,
+        persist: persist2,
         logger,
+        hooks,
         shouldIgnore: (full: string, base: string) => {
           if (isIgnored(full)) { return true; }
           if (isIgnored(base)) { return true; }
@@ -304,7 +309,7 @@ export function makeWebdavApp(opts: {
       if (!ok) { return send(c, { status: 423 }); }
       const etagOk = await etagMatchesIfHeader(basePersist, p, c.req.raw.headers);
       if (!etagOk) { return send(c, { status: 412 }); }
-      const result = await handleProppatchRequest(p, body, { persist: basePersist, logger });
+      const result = await handleProppatchRequest(p, body, { persist: createRequestContext(basePersist), logger });
       return send(c, result.response);
     }
 
@@ -315,7 +320,7 @@ export function makeWebdavApp(opts: {
       const destination = c.req.header("Destination");
       if (!destination) { return send(c, { status: 400 }); }
       const overwrite = (c.req.header("Overwrite") ?? "T").toUpperCase() !== "F";
-      const persist = basePersist;
+      const persist = createRequestContext(basePersist);
       const destPath = pathFromUrlOrAbsolute(destination);
       if (!destPath) { return send(c, { status: 400 }); }
       const okDepth = await ensureDepthOkForDirOpsGuard(compat, c, method, p, persist);
@@ -380,7 +385,7 @@ export function makeWebdavApp(opts: {
         return send(c, { status: 403 });
       }
       const body = await c.req.text().then((t) => t).catch(() => "");
-      const res = await handleReportRequest(p, { persist: basePersist, logger }, body);
+      const res = await handleReportRequest(p, { persist: createRequestContext(basePersist), logger }, body);
       return send(c, res.response);
     }
 
@@ -389,7 +394,7 @@ export function makeWebdavApp(opts: {
         return send(c, { status: 403 });
       }
       const body = await c.req.text().then((t) => t).catch(() => "");
-      const res = await handleOrderpatchRequest(p, body, { persist: basePersist, logger });
+      const res = await handleOrderpatchRequest(p, body, { persist: createRequestContext(basePersist), logger });
       return send(c, res.response);
     }
 

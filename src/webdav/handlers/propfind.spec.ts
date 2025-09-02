@@ -32,7 +32,7 @@ function createHooks(persist: ReturnType<typeof createMemoryAdapter>): WebDavHoo
         await persist.writeFile([...dir, "file.txt"], new TextEncoder().encode("content"), "text/plain");
       }
     },
-    async fabricateFileContent() { return "Generated content"; },
+    async fabricateFileContent() { /* notification only */ },
   };
   return createLlmWebDavHooks(llm);
 }

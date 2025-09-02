@@ -33,7 +33,12 @@ export async function handlePropfindRequest(
   if (!exists) {
     const maybe = await runBeforePropfindHook(hooks, { urlPath, segments, depth: normalizedDepth, persist, logger });
     if (maybe) { return { response: maybe }; }
-    // proceed to list (hook may have created it), else 404
+    // Re-check existence after hook; only proceed if created
+    const nowExists = await persist.exists(segments).catch(() => false);
+    if (!nowExists) {
+      logger?.logList(urlPath, 404);
+      return { response: { status: 404 } };
+    }
     const res = await buildPropfindResponse(createDataLoaderAdapter(persist), urlPath, segments, normalizedDepth, logger, shouldIgnore, bodyText ?? undefined);
     return { response: res };
   }
@@ -127,7 +132,7 @@ async function buildPropfindResponse(
   appliedReturnMinimal?: boolean,
 ): Promise<DavResponse> {
   const p = createDataLoaderAdapter(persist);
-  const exists = await persist.exists(parts);
+  const exists = await p.exists(parts);
   if (!exists) {
     logger?.logList(urlPath, 404);
     return { status: 404 };

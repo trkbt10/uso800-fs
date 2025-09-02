@@ -27,9 +27,10 @@ describe("WebDAV Integration", () => {
         await persist.writeFile([...path, "test.txt"], new TextEncoder().encode("test content"), "text/plain");
         await persist.ensureDir([...path, "subdir"]);
       },
-      async fabricateFileContent() {
+      async fabricateFileContent(path) {
         calls2.push([]);
-        return "Generated file content";
+        // Write content directly to persist to simulate LLM applying changes
+        await persist.writeFile(path.length > 0 ? path : ["generated.txt"], new TextEncoder().encode("Generated file content"), "text/plain");
       },
     };
     

@@ -31,7 +31,7 @@ export async function fabricateFileImpl(
   deps: FileDeps,
   pathParts: string[],
   options?: { mimeHint?: string },
-): Promise<string> {
+): Promise<void> {
   const key = `FILE:${deps.keyOf(pathParts)}:MIME:${options?.mimeHint ?? ""}`;
   return deps.withCoalescing(deps.inflight, key, async () => {
     const stats: { files: number; bytes: number; fileName?: string } = { files: 0, bytes: 0 };
@@ -58,10 +58,11 @@ export async function fabricateFileImpl(
     }
 
     const stream = await deps.client.responses.stream(request);
-    async function process(path: string[], content: string, mime: string): Promise<string> {
-      return execProcessEmitFile(deps.execDeps, stats, path, content, mime);
+    async function process(path: string[], content: string, mime: string): Promise<void> {
+      await execProcessEmitFile(deps.execDeps, stats, path, content, mime);
+      return undefined;
     }
-    const res = await runToolCallStreaming<string>(
+    await runToolCallStreaming<void>(
       stream as AsyncIterable<Responses.ResponseStreamEvent>,
       ({ name, params }) => {
         if (!name) { return undefined; }
@@ -84,6 +85,6 @@ export async function fabricateFileImpl(
       const displayPath = promptResult.displayPath;
       deps.tracker.track("llm.end", { context: "fabricateFileContent", path: displayPath, stats });
     }
-    return typeof res === "string" ? res : "";
+    return undefined;
   });
 }

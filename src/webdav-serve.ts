@@ -10,13 +10,13 @@ import { resolve } from "node:path";
 import { existsSync, mkdirSync } from "node:fs";
 import { makeWebdavApp } from "./webdav/server";
 import { createNodeFsAdapter } from "./webdav/persist/node-fs";
-import { createDataLoaderAdapter } from "./webdav/persist/dataloader-adapter";
 import { createWebDAVLogger } from "./logging/webdav-logger";
 import { composeDialects } from "./webdav/dialect/types";
 import { finderDialect } from "./webdav/dialect/finder";
 import { windowsWebClientDialect } from "./webdav/dialect/windows";
 import { linuxGvfsDialect } from "./webdav/dialect/linux";
 import { officeDialect } from "./webdav/dialect/office";
+import { bootstrapInitialFs } from "./bootstrap";
 
 /**
  * Parsed CLI options for the standalone server.
@@ -80,11 +80,13 @@ async function main(): Promise<void> {
       mkdirSync(opts.root, { recursive: true });
     }
 
-    const nodeFs = createNodeFsAdapter(opts.root);
-    const persist = createDataLoaderAdapter(nodeFs);
+    const persist = createNodeFsAdapter(opts.root);
     const logger = createWebDAVLogger();
     const dialect = composeDialects([finderDialect(), windowsWebClientDialect(), linuxGvfsDialect(), officeDialect()]);
     const app = makeWebdavApp({ persist, logger, dialect });
+
+    // Common bootstrap (no-op without LLM fabricateListing)
+    void bootstrapInitialFs(persist, { fabricateListing: undefined, silent: true });
 
     serve({ fetch: app.fetch, port: opts.port, hostname: opts.host });
 

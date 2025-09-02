@@ -29,7 +29,6 @@ export type OrchestratorBaseDeps = {
 export type ListingDeps = OrchestratorBaseDeps & { inflight: Map<string, Promise<void>> };
 
 /**
- * Dependencies specialized for file fabrication (inflight<string>).
+ * Dependencies specialized for file fabrication (inflight<void>), notification-style.
  */
-export type FileDeps = OrchestratorBaseDeps & { inflight: Map<string, Promise<string>> };
-
+export type FileDeps = OrchestratorBaseDeps & { inflight: Map<string, Promise<void>> };

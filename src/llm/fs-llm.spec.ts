@@ -125,16 +125,15 @@ describe("fs-llm with PersistAdapter", () => {
         persist 
       });
       
-      const result = await instance.fabricateFileContent(["test.txt"]);
+      await instance.fabricateFileContent(["test.txt"]);
       
-      expect(result).toBe("Generated content");
       expect(await persist.exists(["test.txt"])).toBe(true);
       
       const content = await persist.readFile(["test.txt"]);
       expect(new TextDecoder().decode(content)).toBe("Generated content");
     });
 
-    it("returns empty string when no content generated", async () => {
+    it("no-op when no content generated (no tool call)", async () => {
       const persist = createMemoryAdapter();
       const mockStream = (async function* () {
         // Empty stream
@@ -147,9 +146,9 @@ describe("fs-llm with PersistAdapter", () => {
         persist 
       });
       
-      const result = await instance.fabricateFileContent(["test.txt"]);
-      
-      expect(result).toBe("");
+      await instance.fabricateFileContent(["test.txt"]);
+      // No content was generated; file should not exist
+      expect(await persist.exists(["test.txt"])).toBe(false);
     });
   });
 });

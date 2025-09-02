@@ -51,6 +51,10 @@ const validateConfig = ajv.compile(cliConfigSchema);
  * Loads uso800fs.config.json from cwd (if present) and returns normalized config.
  */
 export function loadConfigFile(cwd: string = process.cwd()): CliConfig | undefined {
+  // In test runs, avoid loading external config to keep tests deterministic
+  if (process.env.NODE_ENV === "test") {
+    return undefined;
+  }
   const p = resolve(cwd, "uso800fs.config.json");
   if (!existsSync(p)) {
     return undefined;
@@ -253,6 +257,7 @@ export function mergeConfigWithCli(
     instruction,
     textInstruction,
     imageInstruction,
+    state: cli.state,
     persistRoot,
     ignore,
     image: createImageConfig(imageProvider),

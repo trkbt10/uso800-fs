@@ -33,10 +33,11 @@ export async function handlePutRequest(
 
   const state: { data: Uint8Array; contentType: string | undefined } = { data: initial, contentType: undefined };
   const setBody = (next: Uint8Array, ct?: string) => { state.data = next; state.contentType = ct; };
-  // Hook can mutate body or short-circuit
+  // Hook (notification) may generate content directly when body is empty; still allow short-circuit if it returns a response
   const maybe = await (async (h: WebDavHooks | undefined) => {
     if (!h?.beforePut) { return undefined; }
     try {
+      // Keep setBody for backward compatibility; LLM hook now writes via persist directly
       return await h.beforePut({ urlPath, segments, body: state.data, setBody, persist, logger });
     } catch {
       return undefined;
@@ -50,6 +51,21 @@ export async function handlePutRequest(
   if (parts.length === 0) {
     return { response: { status: 400 } };
   }
+  // If body is empty and hook generated content already, avoid overwriting it with empty data
+  if (initial.byteLength === 0) {
+    const existingAfterHook = await statOrNull(persist, parts);
+    if (existingAfterHook) {
+      if (existingAfterHook.type === "file") {
+        const sz = existingAfterHook.size ?? 0;
+        if (sz > 0) {
+          logger?.logWrite(urlPath, 201, sz);
+          await recordVersion(persist, urlPath, new Uint8Array(0), state.contentType).catch(() => undefined);
+          return { response: { status: 201 } };
+        }
+      }
+    }
+  }
+
   // Quota enforcement (basic): if a global limit exists, ensure the write fits.
   const limit = await getQuotaLimitBytes(persist);
   if (limit !== null) {

@@ -67,9 +67,9 @@ export function createUsoFsLLMInstance(
   }
 
   // In-flight coalescing to avoid duplicate LLM runs for the same target
-  const inflight: { listing: Map<string, Promise<void>>; file: Map<string, Promise<string>> } = {
+  const inflight: { listing: Map<string, Promise<void>>; file: Map<string, Promise<void>> } = {
     listing: new Map<string, Promise<void>>(),
-    file: new Map<string, Promise<string>>(),
+    file: new Map<string, Promise<void>>(),
   };
 
   function withCoalescing<T>(map: Map<string, Promise<T>>, key: string, run: () => Promise<T>): Promise<T> {
@@ -106,9 +106,9 @@ export function createUsoFsLLMInstance(
   }
 
   /**
-   * Requests fabricated file content for the specified path using LLM tool-calls.
+   * Notification: request LLM to create/update a file; side-effects are applied via PersistAdapter.
    */
-  async function fabricateFileContent(pathParts: string[], options?: { mimeHint?: string }): Promise<string> {
+  async function fabricateFileContent(pathParts: string[], options?: { mimeHint?: string }): Promise<void> {
     return fabricateFileImpl(
       {
         client,
