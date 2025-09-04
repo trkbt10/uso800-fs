@@ -26,9 +26,11 @@ export function composeHooks(...hooksList: Array<WebDavHooks | undefined>): WebD
   }
   return {
     async authorize(ctx) { return await first((h) => h.authorize, ctx); },
+    async beforeRequest(ctx) { return await first((h) => h.beforeRequest, ctx); },
     async beforeGet(ctx) { return await first((h) => h.beforeGet, ctx); },
     async beforePut(ctx) { return await first((h) => h.beforePut, ctx); },
     async beforePropfind(ctx) { return await first((h) => h.beforePropfind, ctx); },
+    async beforeReport(ctx) { return await first((h) => h.beforeReport, ctx); },
     async afterGet(ctx, res) {
       for (const h of list) {
         if (h.afterGet) {
@@ -60,6 +62,33 @@ export function composeHooks(...hooksList: Array<WebDavHooks | undefined>): WebD
       for (const h of list) {
         if (h.afterMkcol) {
           const out = await h.afterMkcol(ctx, res);
+          if (out !== undefined) { return out; }
+        }
+      }
+      return undefined;
+    },
+    async afterReport(ctx, res) {
+      for (const h of list) {
+        if (h.afterReport) {
+          const out = await h.afterReport(ctx, res);
+          if (out !== undefined) { return out; }
+        }
+      }
+      return undefined;
+    },
+    async afterRequest(ctx, res) {
+      for (const h of list) {
+        if (h.afterRequest) {
+          const out = await h.afterRequest(ctx, res);
+          if (out !== undefined) { return out; }
+        }
+      }
+      return undefined;
+    },
+    async afterOptions(ctx, headers) {
+      for (const h of list) {
+        if (h.afterOptions) {
+          const out = await h.afterOptions(ctx, headers);
           if (out !== undefined) { return out; }
         }
       }

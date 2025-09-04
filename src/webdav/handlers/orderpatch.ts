@@ -5,9 +5,10 @@
  */
 import type { HandlerOptions, HandlerResult } from "./types";
 import { setOrder } from "../order";
+import { createDavStateStore } from "../dav-state";
 import { pathToSegments } from "../../utils/path-utils";
 
-function extractSegments(body: string): string[] {
+export function extractSegments(body: string): string[] {
   const segs: string[] = [];
   for (const m of body.matchAll(/<\s*(?:[A-Za-z]+:)?segment\b[^>]*>([\s\S]*?)<\s*\/\s*(?:[A-Za-z]+:)?segment\s*>/gi)) {
     const val = (m[1] ?? "").trim();
@@ -33,7 +34,11 @@ export async function handleOrderpatchRequest(urlPath: string, bodyText: string,
   const names = extractSegments(bodyText);
   if (names.length === 0) { return { response: { status: 400 } }; }
   await setOrder(persist, urlPath, names);
+  // Also store CSV order in DavState props for robustness across adapters
+  try {
+    const store = createDavStateStore(persist);
+    await store.mergeProps(urlPath, { "Z:order": names.join(",") });
+  } catch { /* ignore */ }
   logger?.logOutput("ORDERPATCH", urlPath, 200);
   return { response: { status: 200 } };
 }
-

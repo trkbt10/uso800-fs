@@ -32,7 +32,7 @@ import { parseMkcolProps } from "./xml/mkcol-parse";
 import { isMethodAllowed } from "./acl";
 import { handleSearchRequest } from "./handlers/search";
 import { handleReportRequest } from "./handlers/report";
-import { handleOrderpatchRequest } from "./handlers/orderpatch";
+import { handleOrderpatchRequest, extractSegments } from "./handlers/orderpatch";
 import type { DialectPolicy } from "./dialect/types";
 import { strictDialect } from "./dialect/types";
 import { composeHooks } from "./hooks-compose";
@@ -49,6 +49,25 @@ import { createRequestContext } from "./persist/request-context";
  * method-specific invariants (e.g., MKCOL body rejection, LOCK token checks),
  * injects default WebDAV headers, and integrates directory/file ignore filters.
  */
+/**
+ * Handler for custom HTTP/WebDAV methods (e.g., MKCALENDAR).
+ * It receives method/path/headers/body text and can return a DavResponse.
+ */
+type CustomMethodHandler = (ctx: {
+  method: string;
+  urlPath: string;
+  headers: Record<string, string>;
+  bodyText: string;
+  persist: PersistAdapter;
+  hooks?: WebDavHooks;
+  logger?: WebDAVLogger;
+}) => Promise<DavResponse> | DavResponse;
+
+/**
+ * Create a Hono-based WebDAV app using the provided PersistAdapter.
+ * Supports optional dialect hooks and optional custom method handlers
+ * (e.g., MKCALENDAR via CalDAV integration) without hardcoding them.
+ */
 export function makeWebdavApp(opts: {
   persist: PersistAdapter;
   hooks?: WebDavHooks;
@@ -56,6 +75,8 @@ export function makeWebdavApp(opts: {
   ignoreGlobs?: string[];
   /** Optional client dialect policy layer (sidecar). */
   dialect?: DialectPolicy;
+  /** Optional custom method handlers (e.g., MKCALENDAR). Keys must be uppercase. */
+  customMethods?: Record<string, CustomMethodHandler>;
 }) {
   const basePersist = opts.persist;
   const hooks = composeHooks(
@@ -106,9 +127,40 @@ export function makeWebdavApp(opts: {
     await next();
   });
 
-  app.options("/*", (c) => {
+  app.options("/*", async (c) => {
     logger.logInput("OPTIONS", c.req.path);
-    return send(c, handleOptions(logger));
+    const base = handleOptions(logger);
+    // Allow hooks to adjust headers (e.g., Add DAV tokens, Allow methods)
+    const headersIn: Record<string, string> = { ...(base.headers ?? {}) };
+    const additions: Record<string, string> | void | undefined = await (async () => {
+      try {
+        return await hooks.afterOptions?.({ urlPath: c.req.path, segments: pathToSegments(c.req.path), persist: basePersist, logger, getHeader(name: string): string { const v = c.req.header(name); return typeof v === "string" ? v : ""; } }, headersIn);
+      } catch {
+        return undefined;
+      }
+    })();
+    if (additions && typeof additions === "object") {
+      const merged: Record<string, string> = { ...headersIn };
+      for (const [k, vRaw] of Object.entries(additions as Record<string, string>)) {
+        const v = String(vRaw);
+        if (k.toLowerCase() === "allow" && merged[k]) {
+          const prev = merged[k].split(",").map((s: string) => s.trim().toUpperCase()).filter(Boolean);
+          const next = v.split(",").map((s: string) => s.trim().toUpperCase()).filter(Boolean);
+          const set = new Set([...prev, ...next]);
+          merged[k] = Array.from(set).join(", ");
+        } else if (k.toLowerCase() === "dav" && merged[k]) {
+          // Merge DAV compliance tokens
+          const prev = merged[k].split(",").map((s: string) => s.trim()).filter(Boolean);
+          const next = v.split(",").map((s: string) => s.trim()).filter(Boolean);
+          const set = new Set([...prev, ...next]);
+          merged[k] = Array.from(set).join(", ");
+        } else {
+          merged[k] = v;
+        }
+      }
+      return send(c, { ...base, headers: merged });
+    }
+    return send(c, base);
   });
 
   function maybeIgnore(c: Context, method: string): Response | null {
@@ -273,6 +325,8 @@ export function makeWebdavApp(opts: {
       return send(c, result.response);
     }
 
+    // (MKCALENDAR removed from core; handle via customMethods)
+
     if (method === "SEARCH") {
       if (!(await isMethodAllowed(basePersist, p, "SEARCH"))) {
         return send(c, { status: 403 });
@@ -385,8 +439,18 @@ export function makeWebdavApp(opts: {
         return send(c, { status: 403 });
       }
       const body = await c.req.text().then((t) => t).catch(() => "");
-      const res = await handleReportRequest(p, { persist: createRequestContext(basePersist), logger }, body);
-      return send(c, res.response);
+      const ctx = { urlPath: p, segments: pathToSegments(p), persist: createRequestContext(basePersist), logger, bodyText: body, getHeader(name: string): string { const v = c.req.header(name); return typeof v === "string" ? v : ""; } } as const;
+      try {
+        const pre = await hooks.beforeReport?.(ctx);
+        if (pre) { return send(c, pre); }
+      } catch { /* ignore */ }
+      const res = await handleReportRequest(p, { persist: ctx.persist, logger }, body);
+      try {
+        const post = await hooks.afterReport?.(ctx, res.response);
+        return send(c, post ?? res.response);
+      } catch {
+        return send(c, res.response);
+      }
     }
 
     if (method === "ORDERPATCH") {
@@ -394,11 +458,52 @@ export function makeWebdavApp(opts: {
         return send(c, { status: 403 });
       }
       const body = await c.req.text().then((t) => t).catch(() => "");
-      const res = await handleOrderpatchRequest(p, body, { persist: createRequestContext(basePersist), logger });
+      // Use base persist to ensure order file visibility across requests
+      const res = await handleOrderpatchRequest(p, body, { persist: basePersist, logger });
+      // Best-effort: also store CSV order into DavState props so subsequent requests observe order
+      try {
+        if (res.response.status >= 200 && res.response.status < 300) {
+          const names: string[] = extractSegments(body);
+          if (names.length > 0) {
+            const store = createDavStateStore(basePersist);
+            await store.mergeProps(p, { "Z:order": names.join(",") });
+          }
+        }
+      } catch { /* ignore */ }
       return send(c, res.response);
     }
 
+    // Custom methods provided via options (e.g., MKCALENDAR)
+    const handler = opts.customMethods?.[method];
+    if (handler) {
+      const headersMap: Record<string, string> = {};
+      for (const [k, v] of c.req.raw.headers) { headersMap[k] = v; }
+      const bodyText = await c.req.text().then((t) => t).catch(() => "");
+      const resp = await Promise.resolve(handler({ method, urlPath: p, headers: headersMap, bodyText, persist: basePersist, hooks, logger })).catch(() => ({ status: 500 } as const));
+      return send(c, resp);
+    }
+
     await next();
+  });
+
+  // Explicit ORDERPATCH route (some frameworks may not route unknown methods via middleware in all environments)
+  app.on("ORDERPATCH", "/*", async (c) => {
+    const p = c.req.path;
+    if (!(await isMethodAllowed(basePersist, p, "ORDERPATCH"))) {
+      return send(c, { status: 403 });
+    }
+    const body = await c.req.text().then((t) => t).catch(() => "");
+    const res = await handleOrderpatchRequest(p, body, { persist: basePersist, logger });
+    try {
+      if (res.response.status >= 200 && res.response.status < 300) {
+        const names: string[] = extractSegments(body);
+        if (names.length > 0) {
+          const store = createDavStateStore(basePersist);
+          await store.mergeProps(p, { "Z:order": names.join(",") });
+        }
+      }
+    } catch { /* ignore */ }
+    return send(c, res.response);
   });
 
   return app;

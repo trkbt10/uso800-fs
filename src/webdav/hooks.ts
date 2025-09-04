@@ -25,6 +25,15 @@ export type WebDavPutContext = WebDavCommonContext & {
 };
 export type WebDavMkcolContext = WebDavCommonContext & {};
 
+// Generic request contexts
+export type WebDavRequestContext = WebDavCommonContext & {
+  method: string;
+  headers: Record<string, string>;
+  bodyText?: string;
+};
+export type WebDavReportContext = WebDavCommonContext & { bodyText: string; getHeader?: (name: string) => string };
+export type WebDavOptionsContext = WebDavCommonContext & { getHeader?: (name: string) => string };
+
 /**
  * Authentication/authorization context. Called before routing a request.
  * If a hook returns a DavResponse (e.g., 401/403), the request is short-circuited.
@@ -55,6 +64,10 @@ export type WebDavHooks = {
   // Authorization (runs before any handler)
   authorize?: Hook<WebDavAuthContext>;
 
+  // Generic request lifecycle
+  beforeRequest?: Hook<WebDavRequestContext>;
+  afterRequest?: AfterHook<WebDavRequestContext>;
+
   // GET
   beforeGet?: Hook<WebDavGetContext>;
   afterGet?: AfterHook<WebDavGetContext>;
@@ -70,4 +83,11 @@ export type WebDavHooks = {
   // MKCOL
   beforeMkcol?: Hook<WebDavMkcolContext>;
   afterMkcol?: AfterHook<WebDavMkcolContext>;
+
+  // REPORT
+  beforeReport?: Hook<WebDavReportContext>;
+  afterReport?: AfterHook<WebDavReportContext>;
+
+  // OPTIONS header adjustments
+  afterOptions?: (ctx: WebDavOptionsContext, headers: Record<string, string>) => MaybePromise<Record<string, string> | void>;
 };

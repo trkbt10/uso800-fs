@@ -75,6 +75,7 @@ import type { PersistAdapter, Stat } from "../persist/types";
 import { createDataLoaderAdapter } from "../persist/dataloader-adapter";
 import type { WebDAVLogger } from "../../logging/webdav-logger";
 import type { DavResponse } from "../../webdav/handlers/types";
+import { createDavStateStore } from "../dav-state";
 import { applyOrder } from "../order";
 import { computeUsedBytes } from "../utils/usage";
 import { getQuotaLimitBytes } from "../quota";
@@ -155,10 +156,21 @@ async function buildPropfindResponse(
   async function computeUsedBytesLocal(path: string[]): Promise<number> { return await computeUsedBytes(p, path); }
 
   async function renderPropBlocks(name: string, path: string[], st: Stat, keys: string[] | null, propnameOnly: boolean): Promise<{ ok: string; nf: string }> {
+    const urlForProps = "/" + path.join("/");
+    const propsStore = createDavStateStore(p);
+    const storedProps = await propsStore.getProps(urlForProps).catch(() => ({} as Record<string, string>));
+    const defaultResourcetype = st.type === "dir" ? "<D:collection/>" : "";
+    const storedResTypeRaw = storedProps["D:resourcetype"];
+    const resourcetypeValue = (() => {
+      if (typeof storedResTypeRaw === "string" && storedResTypeRaw.trim().length > 0) {
+        return storedResTypeRaw;
+      }
+      return defaultResourcetype;
+    })();
     const map: Record<string, string> = {
       "D:displayname": name,
       "D:getcontentlength": String(st.size ?? 0),
-      "D:resourcetype": st.type === "dir" ? "<D:collection/>" : "",
+      "D:resourcetype": resourcetypeValue,
       // Finder expects UTC timezone for getlastmodified.
       // @reference https://sabre.io/dav/clients/finder/
       //   quote: "best to send back all getlastmodified properties in the UTC timezone."
@@ -171,6 +183,16 @@ async function buildPropfindResponse(
     for (const k of selected) {
       const has = Object.prototype.hasOwnProperty.call(map, k);
       if (!has) {
+        // Dead/live properties stored via PROPPATCH or sidecar
+        const stored = storedProps[k];
+        if (typeof stored === "string") {
+          if (propnameOnly) {
+            ok.push(`<${k}/>`);
+          } else {
+            ok.push(`<${k}>${stored}</${k}>`);
+          }
+          continue;
+        }
         if (k === "D:quota-used-bytes") {
           const used = await computeUsedBytesLocal(path);
           ok.push(`<D:quota-used-bytes>${String(used)}</D:quota-used-bytes>`);

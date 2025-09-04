@@ -2,6 +2,7 @@
  * @file Simple collection order storage and helpers.
  */
 import type { PersistAdapter } from "./persist/types";
+import { createDavStateStore } from "./dav-state";
 
 type OrderFile = { names: string[] };
 
@@ -58,11 +59,21 @@ export async function setOrder(persist: PersistAdapter, urlPath: string, names: 
  * in their original order.
  */
 export async function applyOrder(persist: PersistAdapter, urlPath: string, names: string[]): Promise<string[]> {
-  const order = await getOrder(persist, urlPath);
+  let order = await getOrder(persist, urlPath);
+  if (order.length === 0) {
+    // Fallback to DavState props 'Z:order' (comma-separated)
+    try {
+      const store = createDavStateStore(persist);
+      const props = await store.getProps(urlPath);
+      const csv = props["Z:order"] ?? "";
+      if (typeof csv === "string" && csv.length > 0) {
+        order = csv.split(",").map((s) => s.trim()).filter((s) => s.length > 0);
+      }
+    } catch { /* ignore */ }
+  }
   if (order.length === 0) { return names; }
   const set = new Set(names);
   const first = order.filter((n) => set.has(n));
   const rest = names.filter((n) => !first.includes(n));
   return [...first, ...rest];
 }
-
